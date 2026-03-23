@@ -60,7 +60,7 @@ def serve():
     logger.info("Starting Database Agent A2A server on port %d", DATABASE_AGENT_PORT)
 
     agent = create_database_agent()
-    a2a_server = A2AServer(agent=agent)
+    a2a_server = A2AServer(agent=agent, enable_a2a_compliant_streaming=True)
     a2a_server.serve(host="0.0.0.0", port=DATABASE_AGENT_PORT)
 
 
