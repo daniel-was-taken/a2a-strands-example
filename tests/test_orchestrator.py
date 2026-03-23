@@ -14,11 +14,11 @@ def test_submit_non_destructive_query(client):
 
 
 def test_submit_destructive_query_is_rejected(client):
-    """Destructive query rejected by safety reviewer should be REJECTED."""
+    """Destructive query rejected by safety reviewer should be RECOMMENDED_REJECT."""
     resp = client.post("/query", json={"query": "delete all employees"})
     assert resp.status_code == 201
     data = resp.json()
-    assert data["status"] == "REJECTED"
+    assert data["status"] == "RECOMMENDED_REJECT"
     assert "review_verdict" in data
 
 
@@ -31,6 +31,7 @@ def test_submit_destructive_query_pending_approval(client_approve):
     data = resp.json()
     assert data["status"] == "PENDING_APPROVAL"
     assert "APPROVE" in data["review_verdict"]
+    assert data["approval_id"] is not None
 
 
 def test_submit_empty_query_returns_422(client):
@@ -78,10 +79,11 @@ def test_approve_pending_query(client_approve):
     post_resp = client_approve.post(
         "/query", json={"query": "delete from users where id = 5"}
     )
-    request_id = post_resp.json()["request_id"]
-    assert post_resp.json()["status"] == "PENDING_APPROVAL"
+    data = post_resp.json()
+    assert data["status"] == "PENDING_APPROVAL"
+    approval_id = data["approval_id"]
 
-    resp = client_approve.post(f"/queries/{request_id}/approve")
+    resp = client_approve.post(f"/queries/approve/{approval_id}")
     assert resp.status_code == 200
     assert resp.json()["status"] == "COMPLETED"
 
@@ -91,24 +93,33 @@ def test_reject_pending_query(client_approve):
     post_resp = client_approve.post(
         "/query", json={"query": "delete from users where id = 5"}
     )
-    request_id = post_resp.json()["request_id"]
+    data = post_resp.json()
+    approval_id = data["approval_id"]
 
-    resp = client_approve.post(f"/queries/{request_id}/reject")
+    resp = client_approve.post(f"/queries/reject/{approval_id}")
     assert resp.status_code == 200
     assert resp.json()["status"] == "REJECTED"
 
 
-def test_approve_non_pending_returns_409(client):
-    """Cannot approve a query that is not PENDING_APPROVAL."""
-    post_resp = client.post("/query", json={"query": "Show all tables"})
-    request_id = post_resp.json()["request_id"]
+def test_approve_non_pending_returns_409(client_approve):
+    """Cannot approve a query that is not PENDING_APPROVAL once resolved."""
+    # First create a pending query, then reject it, then try to approve via approval_id
+    post_resp = client_approve.post(
+        "/query", json={"query": "delete from users where id = 5"}
+    )
+    data = post_resp.json()
+    approval_id = data["approval_id"]
 
-    resp = client.post(f"/queries/{request_id}/approve")
+    # Reject it first
+    client_approve.post(f"/queries/reject/{approval_id}")
+
+    # Now try to approve the already-rejected query
+    resp = client_approve.post(f"/queries/approve/{approval_id}")
     assert resp.status_code == 409
 
 
 def test_approve_not_found(client):
-    resp = client.post("/queries/nonexistent-id/approve")
+    resp = client.post("/queries/approve/nonexistent")
     assert resp.status_code == 404
 
 
@@ -125,3 +136,37 @@ def test_query_has_events(client):
     assert len(events) >= 2
     assert events[0]["agent"] == "orchestrator"
     assert events[0]["action"] == "received"
+
+
+# ── Readiness probe ─────────────────────────────────────────────────────────
+
+
+def test_readiness_probe(client):
+    """GET /ready should return 200 when agent can be initialised."""
+    resp = client.get("/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+# ── RECOMMENDED_REJECT override ─────────────────────────────────────────────
+
+
+def test_recommended_reject_has_events(client):
+    """RECOMMENDED_REJECT query should have review events."""
+    resp = client.post("/query", json={"query": "delete all employees"})
+    data = resp.json()
+    assert data["status"] == "RECOMMENDED_REJECT"
+    events = data["events"]
+    actions = [e["action"] for e in events]
+    assert "review_started" in actions
+    assert "review_completed" in actions
+    assert "recommended_reject" in actions
+
+
+# ── SSE log stream ───────────────────────────────────────────────────────────
+
+
+def test_log_stream_endpoint_is_registered(client):
+    """The /logs/stream route should be registered in the app."""
+    routes = [r.path for r in client.app.routes if hasattr(r, "path")]
+    assert "/logs/stream" in routes

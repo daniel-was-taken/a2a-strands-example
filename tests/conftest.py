@@ -29,6 +29,16 @@ def _clear_store():
     query_store._records.clear()
 
 
+@pytest.fixture(autouse=True)
+def _reset_agent():
+    """Reset the lazy-loaded agent singleton between tests."""
+    import agents.orchestrator_agent as orch
+
+    orch._agent = None
+    yield
+    orch._agent = None
+
+
 def _make_mock_agents(review_return):
     """Shared helper to build mock patches with a given review_delete_request return."""
     mock_agent = MagicMock()
@@ -36,18 +46,10 @@ def _make_mock_agents(review_return):
 
     mock_model = MagicMock()
 
-    mock_provider = MagicMock()
-    mock_provider.tools = []
-
     return (
         mock_agent,
         patch("agents.model.create_model", return_value=mock_model),
-        patch("agents.orchestrator_agent.create_model", return_value=mock_model),
-        patch("agents.orchestrator_agent.Agent", return_value=mock_agent),
-        patch(
-            "agents.orchestrator_agent.A2AClientToolProvider",
-            return_value=mock_provider,
-        ),
+        patch("agents.db_agent.create_database_agent", return_value=mock_agent),
         patch(
             "agents.orchestrator_agent.create_safety_reviewer",
             return_value=mock_agent,
@@ -63,7 +65,7 @@ def _make_mock_agents(review_return):
 def mock_agents():
     """Patch with safety reviewer that REJECTS destructive queries."""
     mock_agent, *patches = _make_mock_agents((False, "REJECT: test rejection"))
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3]:
         yield mock_agent
 
 
@@ -73,7 +75,7 @@ def mock_agents_approve():
     mock_agent, *patches = _make_mock_agents(
         (True, "APPROVE: clearly scoped request")
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3]:
         yield mock_agent
 
 
