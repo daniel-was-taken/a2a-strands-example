@@ -1,0 +1,20 @@
+services:
+  db-agent:
+    build: .
+    command: ["python", "-m", "agents.db_agent"]
+    env_file: .env
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+
+  orchestrator:
+    build: .
+    command: ["python", "-m", "agents.orchestrator_agent"]
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db-agent
+    environment:
+      DATABASE_AGENT_URL: "http://db-agent:8001/"
+    restart: unless-stopped
