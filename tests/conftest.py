@@ -21,9 +21,16 @@ def _mock_env(monkeypatch):
     monkeypatch.setenv("DATABASE_AGENT_URL", "http://localhost:8001/")
 
 
-@pytest.fixture()
-def mock_agents():
-    """Patch Agent and A2AClientToolProvider so no real LLM or A2A calls are made."""
+@pytest.fixture(autouse=True)
+def _clear_store():
+    """Reset the in-memory store between tests."""
+    from store import query_store
+
+    query_store._records.clear()
+
+
+def _make_mock_agents(review_return):
+    """Shared helper to build mock patches with a given review_delete_request return."""
     mock_agent = MagicMock()
     mock_agent.return_value = "Test agent response"
 
@@ -32,11 +39,10 @@ def mock_agents():
     mock_provider = MagicMock()
     mock_provider.tools = []
 
-    with (
+    return (
+        mock_agent,
         patch("agents.model.create_model", return_value=mock_model),
-        patch(
-            "agents.orchestrator_agent.create_model", return_value=mock_model
-        ),
+        patch("agents.orchestrator_agent.create_model", return_value=mock_model),
         patch("agents.orchestrator_agent.Agent", return_value=mock_agent),
         patch(
             "agents.orchestrator_agent.A2AClientToolProvider",
@@ -48,15 +54,40 @@ def mock_agents():
         ),
         patch(
             "agents.orchestrator_agent.review_delete_request",
-            return_value=(False, "REJECT: test rejection"),
+            return_value=review_return,
         ),
-    ):
+    )
+
+
+@pytest.fixture()
+def mock_agents():
+    """Patch with safety reviewer that REJECTS destructive queries."""
+    mock_agent, *patches = _make_mock_agents((False, "REJECT: test rejection"))
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        yield mock_agent
+
+
+@pytest.fixture()
+def mock_agents_approve():
+    """Patch with safety reviewer that APPROVES destructive queries."""
+    mock_agent, *patches = _make_mock_agents(
+        (True, "APPROVE: clearly scoped request")
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
         yield mock_agent
 
 
 @pytest.fixture()
 def client(mock_agents):
-    """TestClient with fully mocked backend."""
+    """TestClient with fully mocked backend (safety reviewer rejects)."""
+    from agents.orchestrator_agent import app
+
+    yield TestClient(app)
+
+
+@pytest.fixture()
+def client_approve(mock_agents_approve):
+    """TestClient with fully mocked backend (safety reviewer approves)."""
     from agents.orchestrator_agent import app
 
     yield TestClient(app)

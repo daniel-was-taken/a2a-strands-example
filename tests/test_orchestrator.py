@@ -9,10 +9,12 @@ def test_submit_non_destructive_query(client):
     assert data["status"] == "COMPLETED"
     assert data["request_id"]
     assert data["result"]
+    assert data["query"] == "Show all tables"
+    assert len(data["events"]) >= 1
 
 
 def test_submit_destructive_query_is_rejected(client):
-    """Destructive query should be blocked by safety review."""
+    """Destructive query rejected by safety reviewer should be REJECTED."""
     resp = client.post("/query", json={"query": "delete all employees"})
     assert resp.status_code == 201
     data = resp.json()
@@ -20,6 +22,106 @@ def test_submit_destructive_query_is_rejected(client):
     assert "review_verdict" in data
 
 
+def test_submit_destructive_query_pending_approval(client_approve):
+    """Destructive query approved by safety reviewer should be PENDING_APPROVAL."""
+    resp = client_approve.post(
+        "/query", json={"query": "delete from users where id = 5"}
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["status"] == "PENDING_APPROVAL"
+    assert "APPROVE" in data["review_verdict"]
+
+
 def test_submit_empty_query_returns_422(client):
     resp = client.post("/query", json={"query": ""})
     assert resp.status_code == 422
+
+
+# ── Query history endpoints ──────────────────────────────────────────────────
+
+
+def test_list_queries_empty(client):
+    resp = client.get("/queries")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_list_queries_returns_submitted(client):
+    client.post("/query", json={"query": "Show all tables"})
+    resp = client.get("/queries")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["query"] == "Show all tables"
+
+
+def test_get_single_query(client):
+    post_resp = client.post("/query", json={"query": "Show all tables"})
+    request_id = post_resp.json()["request_id"]
+
+    resp = client.get(f"/queries/{request_id}")
+    assert resp.status_code == 200
+    assert resp.json()["request_id"] == request_id
+
+
+def test_get_query_not_found(client):
+    resp = client.get("/queries/nonexistent-id")
+    assert resp.status_code == 404
+
+
+# ── Approval / rejection endpoints ──────────────────────────────────────────
+
+
+def test_approve_pending_query(client_approve):
+    """Approving a PENDING_APPROVAL query should execute it."""
+    post_resp = client_approve.post(
+        "/query", json={"query": "delete from users where id = 5"}
+    )
+    request_id = post_resp.json()["request_id"]
+    assert post_resp.json()["status"] == "PENDING_APPROVAL"
+
+    resp = client_approve.post(f"/queries/{request_id}/approve")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "COMPLETED"
+
+
+def test_reject_pending_query(client_approve):
+    """Rejecting a PENDING_APPROVAL query should mark it REJECTED."""
+    post_resp = client_approve.post(
+        "/query", json={"query": "delete from users where id = 5"}
+    )
+    request_id = post_resp.json()["request_id"]
+
+    resp = client_approve.post(f"/queries/{request_id}/reject")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "REJECTED"
+
+
+def test_approve_non_pending_returns_409(client):
+    """Cannot approve a query that is not PENDING_APPROVAL."""
+    post_resp = client.post("/query", json={"query": "Show all tables"})
+    request_id = post_resp.json()["request_id"]
+
+    resp = client.post(f"/queries/{request_id}/approve")
+    assert resp.status_code == 409
+
+
+def test_approve_not_found(client):
+    resp = client.post("/queries/nonexistent-id/approve")
+    assert resp.status_code == 404
+
+
+# ── Activity events ─────────────────────────────────────────────────────────
+
+
+def test_query_has_events(client):
+    """Completed query should have activity events."""
+    post_resp = client.post("/query", json={"query": "Show all tables"})
+    request_id = post_resp.json()["request_id"]
+
+    resp = client.get(f"/queries/{request_id}")
+    events = resp.json()["events"]
+    assert len(events) >= 2
+    assert events[0]["agent"] == "orchestrator"
+    assert events[0]["action"] == "received"
