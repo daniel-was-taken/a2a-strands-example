@@ -9,6 +9,7 @@ Usage:
 """
 
 import multiprocessing
+import os
 import time
 
 from dotenv import load_dotenv
@@ -31,35 +32,44 @@ def start_orchestrator():
 
 
 def main():
+    mode = os.environ.get("DATABASE_MODE", "direct")
+
     print("\n=== A2A Database Orchestrator ===\n")
-    print("Starting system components...")
-    print("  - Database Agent    (A2A Server) -> http://localhost:8001")
-    print("  - Orchestrator Agent (FastAPI)   -> http://localhost:8000")
-    print()
 
-    db_process = multiprocessing.Process(target=start_db_agent, name="db-agent")
-    orch_process = multiprocessing.Process(target=start_orchestrator, name="orchestrator")
+    if mode == "a2a":
+        print("Starting system components (A2A mode)...")
+        print("  - Database Agent    (A2A Server) -> http://localhost:8001")
+        print("  - Orchestrator Agent (FastAPI)   -> http://localhost:8000")
+        print()
 
-    db_process.start()
+        db_process = multiprocessing.Process(target=start_db_agent, name="db-agent")
+        orch_process = multiprocessing.Process(target=start_orchestrator, name="orchestrator")
 
-    # Give the Database Agent a moment to start before the Orchestrator
-    time.sleep(2)
+        db_process.start()
 
-    orch_process.start()
+        # Give the Database Agent a moment to start before the Orchestrator
+        time.sleep(2)
 
-    print("\nAll components started. Send requests to http://localhost:8000/query")
-    print("Press Ctrl+C to stop.\n")
+        orch_process.start()
 
-    try:
-        db_process.join()
-        orch_process.join()
-    except KeyboardInterrupt:
-        print("\nShutting down...")
-        db_process.terminate()
-        orch_process.terminate()
-        db_process.join(timeout=5)
-        orch_process.join(timeout=5)
-        print("Stopped.")
+        print("\nAll components started. Send requests to http://localhost:8000/query")
+        print("Press Ctrl+C to stop.\n")
+
+        try:
+            db_process.join()
+            orch_process.join()
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+            db_process.terminate()
+            orch_process.terminate()
+            db_process.join(timeout=5)
+            orch_process.join(timeout=5)
+            print("Stopped.")
+    else:
+        print("Starting system (direct mode)...")
+        print("  - Orchestrator -> http://localhost:8000")
+        print()
+        start_orchestrator()
 
 
 if __name__ == "__main__":

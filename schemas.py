@@ -31,6 +31,7 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     request_id: str
+    approval_id: str | None = None
     status: RequestStatus
     query: str = ""
     result: str | None = None

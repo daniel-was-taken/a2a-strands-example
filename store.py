@@ -7,10 +7,14 @@ Firestore, etc.) without changing calling code.
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 from typing import Protocol
 
 from schemas import ActivityEvent, QueryResponse, RequestStatus
+
+logger = logging.getLogger(__name__)
 
 
 class QueryStore(Protocol):
@@ -18,6 +22,7 @@ class QueryStore(Protocol):
 
     def save(self, record: QueryResponse) -> None: ...
     def get(self, request_id: str) -> QueryResponse | None: ...
+    def get_by_approval_id(self, approval_id: str) -> QueryResponse | None: ...
     def list_all(self) -> list[QueryResponse]: ...
     def add_event(self, request_id: str, event: ActivityEvent) -> None: ...
     def update_status(
@@ -25,6 +30,8 @@ class QueryStore(Protocol):
         request_id: str,
         status: RequestStatus,
         result: str | None = None,
+        review_verdict: str | None = None,
+        approval_id: str | None = None,
     ) -> QueryResponse | None: ...
 
 
@@ -42,6 +49,13 @@ class InMemoryStore:
     def get(self, request_id: str) -> QueryResponse | None:
         with self._lock:
             return self._records.get(request_id)
+
+    def get_by_approval_id(self, approval_id: str) -> QueryResponse | None:
+        with self._lock:
+            for rec in self._records.values():
+                if rec.approval_id == approval_id:
+                    return rec
+            return None
 
     def list_all(self) -> list[QueryResponse]:
         with self._lock:
@@ -62,6 +76,8 @@ class InMemoryStore:
         request_id: str,
         status: RequestStatus,
         result: str | None = None,
+        review_verdict: str | None = None,
+        approval_id: str | None = None,
     ) -> QueryResponse | None:
         with self._lock:
             rec = self._records.get(request_id)
@@ -69,9 +85,24 @@ class InMemoryStore:
                 rec.status = status
                 if result is not None:
                     rec.result = result
+                if review_verdict is not None:
+                    rec.review_verdict = review_verdict
+                if approval_id is not None:
+                    rec.approval_id = approval_id
                 return rec
             return None
 
 
 # Singleton used by the application.
-query_store = InMemoryStore()
+def _create_store() -> QueryStore:
+    backend = os.environ.get("STORE_BACKEND", "memory")
+    if backend == "postgres":
+        from db.repository import PostgresStore
+
+        logger.info("Using PostgresStore (DATABASE_URL)")
+        return PostgresStore()
+    logger.info("Using InMemoryStore")
+    return InMemoryStore()
+
+
+query_store: QueryStore = _create_store()
