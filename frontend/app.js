@@ -31,8 +31,8 @@ class ApiClient {
   submitQuery(query)       { return this._request("/query", { method: "POST", body: JSON.stringify({ query }) }); }
   getQueries()             { return this._request("/queries"); }
   getQuery(id)             { return this._request(`/queries/${encodeURIComponent(id)}`); }
-  approveQuery(id)         { return this._request(`/queries/${encodeURIComponent(id)}/approve`, { method: "POST" }); }
-  rejectQuery(id)          { return this._request(`/queries/${encodeURIComponent(id)}/reject`,  { method: "POST" }); }
+  approveQuery(approvalId) { return this._request(`/queries/approve/${encodeURIComponent(approvalId)}`, { method: "POST" }); }
+  rejectQuery(approvalId)  { return this._request(`/queries/reject/${encodeURIComponent(approvalId)}`,  { method: "POST" }); }
 }
 
 const api = new ApiClient();
@@ -56,6 +56,9 @@ const queryForm    = $("#query-form");
 const queryInput   = $("#query-input");
 const submitBtn    = $("#submit-btn");
 const toastBox     = $("#toast-container");
+const logPanel     = $("#log-panel");
+const logToggle    = $("#log-toggle");
+const logBody      = $("#log-body");
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -149,18 +152,24 @@ function renderDetail() {
       <span class="badge badge-${q.status}">${STATUS_LABELS[q.status] || q.status}</span>
     </div>`;
 
-  // Approval dialog
-  if (q.status === "PENDING_APPROVAL" && q.review_verdict) {
+  // Approval dialog — shown for PENDING_APPROVAL and RECOMMENDED_REJECT
+  if ((q.status === "PENDING_APPROVAL" || q.status === "RECOMMENDED_REJECT") && q.review_verdict) {
+    const heading = q.status === "RECOMMENDED_REJECT"
+      ? "Safety Reviewer Recommends Rejection"
+      : "Human Approval Required";
+    const desc = q.status === "RECOMMENDED_REJECT"
+      ? "The safety reviewer recommends rejecting this query. You may override this decision."
+      : "The safety reviewer approved this destructive query, but it requires your confirmation before execution.";
     html += `
-      <div class="approval-box">
-        <h3>Human Approval Required</h3>
-        <p>The safety reviewer approved this destructive query, but it requires your confirmation before execution.</p>
+      <div class="approval-box${q.status === 'RECOMMENDED_REJECT' ? ' approval-box-reject' : ''}">
+        <h3>${heading}</h3>
+        <p>${desc}</p>
         <div class="approval-verdict">${escapeHtml(q.review_verdict)}</div>
         <div class="approval-actions">
-          <button class="btn-approve" data-action="approve" data-id="${escapeHtml(q.request_id)}">
+          <button class="btn-approve" data-action="approve" data-id="${escapeHtml(q.approval_id)}">
             &#10003; Approve &amp; Execute
           </button>
-          <button class="btn-reject" data-action="reject" data-id="${escapeHtml(q.request_id)}">
+          <button class="btn-reject" data-action="reject" data-id="${escapeHtml(q.approval_id)}">
             &#10007; Reject
           </button>
         </div>
@@ -168,12 +177,12 @@ function renderDetail() {
   }
 
   // Result body
-  if (q.result && q.status !== "PENDING_APPROVAL") {
+  if (q.result && q.status !== "PENDING_APPROVAL" && q.status !== "RECOMMENDED_REJECT") {
     html += `<div class="result-body"><pre>${escapeHtml(q.result)}</pre></div>`;
   }
 
   // Verdict (when not pending)
-  if (q.review_verdict && q.status !== "PENDING_APPROVAL") {
+  if (q.review_verdict && q.status !== "PENDING_APPROVAL" && q.status !== "RECOMMENDED_REJECT") {
     html += `<div class="result-verdict">Safety verdict: ${escapeHtml(q.review_verdict)}</div>`;
   }
 
@@ -318,3 +327,33 @@ queryForm.addEventListener("submit", async (e) => {
 
 fetchQueries();
 startPoll();
+
+/* ── SSE Log Stream ───────────────────────────────────────────────────────── */
+
+function connectLogStream() {
+  const evtSource = new EventSource("/logs/stream");
+  evtSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      const line = document.createElement("div");
+      line.className = `log-line log-${data.level}`;
+      line.textContent = `[${data.level}] ${data.logger}: ${data.message}`;
+      logBody.appendChild(line);
+      // Keep max 200 lines
+      while (logBody.children.length > 200) logBody.removeChild(logBody.firstChild);
+      logBody.scrollTop = logBody.scrollHeight;
+    } catch { /* ignore malformed */ }
+  };
+  evtSource.onerror = () => {
+    evtSource.close();
+    setTimeout(connectLogStream, 3000);
+  };
+}
+
+if (logToggle) {
+  logToggle.addEventListener("click", () => {
+    logPanel.classList.toggle("collapsed");
+  });
+}
+
+connectLogStream();
