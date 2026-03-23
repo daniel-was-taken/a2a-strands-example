@@ -5,6 +5,7 @@ the orchestrator can route queries to the right specialist.
 """
 
 import logging
+import time
 from collections.abc import Callable
 
 from strands import Agent, tool
@@ -15,7 +16,8 @@ from mcp_client.neon_mcp import BRANCH, DATABASE, PROJECT_ID
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 2
+MAX_RETRIES = 3
+RETRY_BACKOFF = 2  # seconds, doubles each attempt
 
 SHARED_PROMPT_SUFFIX = (
     "\nIMPORTANT: Consider tables from all user-defined schemas.\n"
@@ -75,16 +77,26 @@ def create_assistant_tool(
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 return _run_with_mcp(formatted_query, system_prompt)
-            except RuntimeError as exc:
-                if "Connection to the MCP server was closed" not in str(exc):
+            except (RuntimeError, Exception) as exc:
+                err_msg = str(exc)
+                is_mcp_error = (
+                    "Connection to the MCP server was closed" in err_msg
+                    or "client session is not running" in err_msg
+                    or "MCPClientInitializationError" in type(exc).__name__
+                )
+                if not is_mcp_error:
                     raise
                 last_err = exc
+                wait = RETRY_BACKOFF * (2 ** (attempt - 1))
                 logger.warning(
-                    "%s: MCP connection lost (attempt %d/%d), retrying",
+                    "%s: MCP connection lost (attempt %d/%d), retrying in %ds",
                     tool_name,
                     attempt,
                     MAX_RETRIES,
+                    wait,
                 )
+                if attempt < MAX_RETRIES:
+                    time.sleep(wait)
         raise last_err  # type: ignore[misc]
 
     assistant.__doc__ = tool_doc
