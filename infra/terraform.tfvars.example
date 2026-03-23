@@ -1,0 +1,19 @@
+project_id   = "YOUR_PROJECT_ID"
+region       = "us-central1"
+service_name = "a2a-orchestrator"
+image_tag    = "latest"
+
+env_vars = {
+  DATABASE_MODE    = "direct"
+  ORCHESTRATOR_PORT = "8000"
+  ALLOWED_ORIGINS  = "*"
+}
+
+secrets = {
+  GOOGLE_API_KEY  = "google-api-key"
+  NEON_API_KEY    = "neon-api-key"
+  NEON_PROJECT_ID = "neon-project-id"
+  NEON_DATABASE   = "neon-database"
+  NEON_BRANCH_ID  = "neon-branch-id"
+  API_KEY         = "api-key"
+}
