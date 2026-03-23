@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 2
 
 SHARED_PROMPT_SUFFIX = (
-    "\nIMPORTANT: Only consider tables from the 'public' schema.\n"
-    "Ignore all system/internal tables.\n\n"
+    "\nIMPORTANT: Consider tables from all user-defined schemas.\n"
+    "Ignore system/internal schemas (pg_catalog, information_schema, etc.).\n\n"
     "Always query the actual database. Never fabricate schema information.\n"
 )
 
