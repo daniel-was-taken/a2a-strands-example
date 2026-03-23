@@ -49,6 +49,9 @@ def create_assistant_tool(
     def _run_with_mcp(formatted_query: str, system_prompt: str) -> str:
         mcp_client = mcp_client_factory()
         with mcp_client:
+            # Mark the client as already started so the Agent doesn't try to
+            # call start() again (which would raise "session is currently running").
+            mcp_client._tool_provider_started = True
             agent = Agent(
                 model=create_model(),
                 system_prompt=system_prompt,
