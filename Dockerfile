@@ -3,16 +3,18 @@ FROM python:3.13-slim
 WORKDIR /app
 
 # Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-prod.txt .
+RUN pip install --no-cache-dir -r requirements-prod.txt
 
 # Copy application code
-COPY schemas.py store.py run_system.py ./
+COPY schemas.py store.py run_system.py log_stream.py hooks.py ./
 COPY agents/ agents/
 COPY tools/ tools/
 COPY mcp_client/ mcp_client/
+COPY db/ db/
 COPY frontend/ frontend/
 
-EXPOSE 8000 8001
+EXPOSE 8000
 
-CMD ["python", "run_system.py"]
+# Default: run orchestrator in direct mode
+CMD ["python", "-m", "agents.orchestrator_agent"]
