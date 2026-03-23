@@ -1,0 +1,8 @@
+strands-agents[gemini]
+strands-agents-tools
+a2a-sdk
+python-dotenv
+fastapi
+uvicorn
+httpx
+pytest
