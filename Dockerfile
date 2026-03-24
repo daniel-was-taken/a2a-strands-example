@@ -7,7 +7,7 @@ COPY requirements-prod.txt .
 RUN pip install --no-cache-dir -r requirements-prod.txt
 
 # Copy application code
-COPY schemas.py store.py run_system.py log_stream.py hooks.py ./
+COPY schemas.py store.py run_system.py log_stream.py ./
 COPY agents/ agents/
 COPY tools/ tools/
 COPY mcp_client/ mcp_client/
@@ -16,5 +16,5 @@ COPY frontend/ frontend/
 
 EXPOSE 8000
 
-# Default: run orchestrator in direct mode
+# Default: run orchestrator (pair with db-agent via docker-compose)
 CMD ["python", "-m", "agents.orchestrator_agent"]

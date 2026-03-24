@@ -6,15 +6,16 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_MODE: "direct"
+      DATABASE_MODE: "a2a"
+      DATABASE_AGENT_URL: "http://db-agent:8001/"
+    depends_on:
+      - db-agent
     restart: unless-stopped
 
-  # Optional: run the DB agent as a separate A2A service
-  # Uncomment and set DATABASE_MODE=a2a on orchestrator to use
-  # db-agent:
-  #   build: .
-  #   command: ["python", "-m", "agents.db_agent"]
-  #   env_file: .env
-  #   ports:
-  #     - "8001:8001"
-  #   restart: unless-stopped
+  db-agent:
+    build: .
+    command: ["python", "-m", "agents.db_agent"]
+    env_file: .env
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
