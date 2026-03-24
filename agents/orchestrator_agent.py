@@ -28,6 +28,7 @@ from schemas import (
     ActivityEvent,
     ErrorResponse,
     HealthResponse,
+    Message,
     QueryRequest,
     QueryResponse,
     RequestStatus,
@@ -39,7 +40,7 @@ from log_stream import broadcaster, install as install_sse_handler
 
 logger = logging.getLogger(__name__)
 
-DATABASE_MODE = os.environ.get("DATABASE_MODE", "direct")
+DATABASE_MODE = os.environ.get("DATABASE_MODE", "a2a")
 DATABASE_AGENT_URL = os.environ.get("DATABASE_AGENT_URL", "http://localhost:8001/")
 ORCHESTRATOR_PORT = int(os.environ.get("ORCHESTRATOR_PORT", "8000"))
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
@@ -47,6 +48,8 @@ API_KEY = os.environ.get("API_KEY", "")
 RATE_LIMIT = os.environ.get("RATE_LIMIT", "30/minute")
 
 DESTRUCTIVE_KEYWORDS = {"delete", "remove", "drop", "truncate", "destroy"}
+
+MAX_THREAD_MESSAGES = 20
 
 _A2A_SYSTEM_PROMPT = """
 You are the Orchestrator Agent. You receive database-related questions from users
@@ -168,6 +171,9 @@ def _execute_query(request_id: str, query: str) -> QueryResponse:
         agent = _get_agent()
         response = str(agent(query))
         _add_event(request_id, "orchestrator", "completed", "Query executed successfully")
+        # Populate the initial conversation messages
+        query_store.add_message(request_id, Message(role="user", content=query))
+        query_store.add_message(request_id, Message(role="agent", content=response))
         rec = query_store.update_status(request_id, RequestStatus.COMPLETED, result=response)
         return rec  # type: ignore[return-value]
     except Exception:
@@ -176,6 +182,35 @@ def _execute_query(request_id: str, query: str) -> QueryResponse:
         rec = query_store.update_status(
             request_id, RequestStatus.FAILED, result="Request failed. Please try again."
         )
+        return rec  # type: ignore[return-value]
+
+
+def _execute_reply(request_id: str, reply: str, record: QueryResponse) -> QueryResponse:
+    """Handle a follow-up reply within an existing query thread."""
+    _add_event(request_id, "orchestrator", "reply", f"Follow-up: {reply[:120]}")
+    query_store.add_message(request_id, Message(role="user", content=reply))
+    try:
+        agent = _get_agent()
+        # Build context from previous messages (capped)
+        messages = record.messages[-MAX_THREAD_MESSAGES:]
+        context_parts = []
+        for msg in messages:
+            label = "User" if msg.role == "user" else "Agent"
+            context_parts.append(f"{label}: {msg.content}")
+        context_parts.append(f"User: {reply}")
+        prompt = "Previous conversation:\n" + "\n".join(context_parts)
+
+        response = str(agent(prompt))
+        query_store.add_message(request_id, Message(role="agent", content=response))
+        _add_event(request_id, "orchestrator", "reply_completed", "Follow-up answered")
+        rec = query_store.update_status(request_id, RequestStatus.COMPLETED, result=response)
+        return rec  # type: ignore[return-value]
+    except Exception:
+        logger.exception("Reply execution failed for request %s", request_id)
+        _add_event(request_id, "orchestrator", "failed", "Follow-up execution failed")
+        err_msg = "Follow-up failed. Please try again."
+        query_store.add_message(request_id, Message(role="agent", content=err_msg))
+        rec = query_store.update_status(request_id, RequestStatus.COMPLETED, result=err_msg)
         return rec  # type: ignore[return-value]
 
 
@@ -293,6 +328,19 @@ def reject_query(approval_id: str) -> QueryResponse:
         record.request_id, RequestStatus.REJECTED, result="Rejected by user."
     )
     return rec  # type: ignore[return-value]
+
+
+@app.post("/query/{request_id}/reply", response_model=QueryResponse)
+def reply_to_query(request_id: str, payload: QueryRequest) -> QueryResponse:
+    """Send a follow-up message to an existing completed query thread."""
+    record = query_store.get(request_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Query not found")
+    if record.status != RequestStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Can only reply to completed queries")
+    if len(record.messages) >= MAX_THREAD_MESSAGES:
+        raise HTTPException(status_code=409, detail="Conversation thread has reached the message limit")
+    return _execute_reply(request_id, payload.query, record)
 
 
 @app.get("/", include_in_schema=False)
