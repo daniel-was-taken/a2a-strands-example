@@ -15,7 +15,7 @@ import os
 import psycopg2
 import psycopg2.extras
 
-from schemas import ActivityEvent, QueryResponse, RequestStatus
+from schemas import ActivityEvent, Message, QueryResponse, RequestStatus
 
 _CREATE_TABLE = """\
 CREATE TABLE IF NOT EXISTS queries (
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS queries (
     query        TEXT NOT NULL DEFAULT '',
     result       TEXT,
     review_verdict TEXT,
+    messages     JSONB NOT NULL DEFAULT '[]'::jsonb,
     events       JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at   TEXT NOT NULL
 );
@@ -39,6 +40,7 @@ def _get_conn():
 
 
 def _row_to_response(row: dict) -> QueryResponse:
+    messages = [Message(**m) for m in (row.get("messages") or [])]
     events = [ActivityEvent(**e) for e in (row["events"] or [])]
     return QueryResponse(
         request_id=row["request_id"],
@@ -47,6 +49,7 @@ def _row_to_response(row: dict) -> QueryResponse:
         query=row["query"],
         result=row.get("result"),
         review_verdict=row.get("review_verdict"),
+        messages=messages,
         events=events,
         created_at=row["created_at"],
     )
@@ -66,14 +69,15 @@ class PostgresStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """INSERT INTO queries
-                       (request_id, approval_id, status, query, result, review_verdict, events, created_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                       (request_id, approval_id, status, query, result, review_verdict, messages, events, created_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (request_id) DO UPDATE SET
                          approval_id = EXCLUDED.approval_id,
                          status = EXCLUDED.status,
                          query = EXCLUDED.query,
                          result = EXCLUDED.result,
                          review_verdict = EXCLUDED.review_verdict,
+                         messages = EXCLUDED.messages,
                          events = EXCLUDED.events,
                          created_at = EXCLUDED.created_at""",
                     (
@@ -83,6 +87,7 @@ class PostgresStore:
                         record.query,
                         record.result,
                         record.review_verdict,
+                        json.dumps([m.model_dump() for m in record.messages]),
                         json.dumps([e.model_dump() for e in record.events]),
                         record.created_at,
                     ),
@@ -118,6 +123,17 @@ class PostgresStore:
                        SET events = events || %s::jsonb
                        WHERE request_id = %s""",
                     (json.dumps([event.model_dump()]), request_id),
+                )
+            conn.commit()
+
+    def add_message(self, request_id: str, message: Message) -> None:
+        with _get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE queries
+                       SET messages = messages || %s::jsonb
+                       WHERE request_id = %s""",
+                    (json.dumps([message.model_dump()]), request_id),
                 )
             conn.commit()
 
