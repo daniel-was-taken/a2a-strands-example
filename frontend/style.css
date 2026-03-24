@@ -655,3 +655,60 @@ body {
 .approval-box-reject p {
   color: var(--red-text);
 }
+
+/* ── Chat thread ─────────────────────────────────────────────────────── */
+
+.chat-thread {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chat-msg-user {
+  align-self: flex-end;
+  background: #eef2ff;
+  color: var(--text);
+  border-bottom-right-radius: 2px;
+}
+
+.chat-msg-agent {
+  align-self: flex-start;
+  background: var(--bg);
+  color: var(--text);
+  border-bottom-left-radius: 2px;
+}
+
+.chat-msg-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.chat-msg-user .chat-msg-label {
+  text-align: right;
+  color: var(--primary);
+}
+
+.chat-msg-time {
+  font-weight: 400;
+  color: var(--text-light);
+  margin-left: 6px;
+}
+
+.chat-msg-content pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12px;
+  margin: 0;
+}

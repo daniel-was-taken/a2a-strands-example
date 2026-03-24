@@ -33,6 +33,7 @@ class ApiClient {
   getQuery(id)             { return this._request(`/queries/${encodeURIComponent(id)}`); }
   approveQuery(approvalId) { return this._request(`/queries/approve/${encodeURIComponent(approvalId)}`, { method: "POST" }); }
   rejectQuery(approvalId)  { return this._request(`/queries/reject/${encodeURIComponent(approvalId)}`,  { method: "POST" }); }
+  replyQuery(id, query)    { return this._request(`/query/${encodeURIComponent(id)}/reply`, { method: "POST", body: JSON.stringify({ query }) }); }
 }
 
 const api = new ApiClient();
@@ -120,6 +121,7 @@ function renderQueryList() {
       renderDetail();
       closeSidebar();
       startDetailPoll();
+      updateInputPlaceholder();
     });
   });
 }
@@ -176,8 +178,20 @@ function renderDetail() {
       </div>`;
   }
 
-  // Result body
-  if (q.result && q.status !== "PENDING_APPROVAL" && q.status !== "RECOMMENDED_REJECT") {
+  // Conversation thread (messages) — shown for completed queries with messages
+  if (q.messages && q.messages.length) {
+    html += `<div class="chat-thread">`;
+    for (const msg of q.messages) {
+      const isUser = msg.role === "user";
+      html += `
+        <div class="chat-msg ${isUser ? 'chat-msg-user' : 'chat-msg-agent'}">
+          <div class="chat-msg-label">${isUser ? 'You' : 'Agent'} <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
+          <div class="chat-msg-content">${isUser ? escapeHtml(msg.content) : '<pre>' + escapeHtml(msg.content) + '</pre>'}</div>
+        </div>`;
+    }
+    html += `</div>`;
+  } else if (q.result && q.status !== "PENDING_APPROVAL" && q.status !== "RECOMMENDED_REJECT") {
+    // Fallback: show plain result for queries without messages
     html += `<div class="result-body"><pre>${escapeHtml(q.result)}</pre></div>`;
   }
 
@@ -302,16 +316,28 @@ queryForm.addEventListener("submit", async (e) => {
   const text = queryInput.value.trim();
   if (!text) return;
 
+  // Determine if this is a reply to an existing completed query
+  const replyTarget = selectedId
+    ? queries.find((q) => q.request_id === selectedId && q.status === "COMPLETED")
+    : null;
+
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<span class="spinner"></span> Sending…';
 
   try {
-    const res = await api.submitQuery(text);
-    selectedId = res.request_id;
+    let res;
+    if (replyTarget) {
+      res = await api.replyQuery(replyTarget.request_id, text);
+      selectedId = res.request_id;
+    } else {
+      res = await api.submitQuery(text);
+      selectedId = res.request_id;
+    }
     queryInput.value = "";
     await fetchQueries();
     renderDetail();
-    startDetailPoll();
+    updateInputPlaceholder();
+    if (!replyTarget) startDetailPoll();
   } catch (err) {
     showToast(err.message);
   } finally {
@@ -322,6 +348,17 @@ queryForm.addEventListener("submit", async (e) => {
       </svg> Send`;
   }
 });
+
+/* ── Input placeholder update ────────────────────────────────────────── */
+
+function updateInputPlaceholder() {
+  const q = selectedId ? queries.find((q) => q.request_id === selectedId) : null;
+  if (q && q.status === "COMPLETED") {
+    queryInput.placeholder = "Reply to this conversation…";
+  } else {
+    queryInput.placeholder = "Enter a database query… e.g. 'Show all tables' or 'Insert a new user'";
+  }
+}
 
 /* ── Init ────────────────────────────────────────────────────────────── */
 
