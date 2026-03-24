@@ -19,6 +19,7 @@ def _mock_env(monkeypatch):
     monkeypatch.setenv("NEON_BRANCH_ID", "main")
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
     monkeypatch.setenv("DATABASE_AGENT_URL", "http://localhost:8001/")
+    monkeypatch.setenv("DATABASE_MODE", "direct")
 
 
 @pytest.fixture(autouse=True)

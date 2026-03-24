@@ -1,6 +1,6 @@
 """Tests for the InMemoryStore."""
 
-from schemas import ActivityEvent, QueryResponse, RequestStatus
+from schemas import ActivityEvent, Message, QueryResponse, RequestStatus
 from store import InMemoryStore
 
 
@@ -70,3 +70,15 @@ def test_add_event():
     rec = store.get("r1")
     assert len(rec.events) == 1
     assert rec.events[0].agent == "test"
+
+
+def test_add_message():
+    store = InMemoryStore()
+    store.save(QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q"))
+    store.add_message("r1", Message(role="user", content="hello"))
+    store.add_message("r1", Message(role="agent", content="world"))
+    rec = store.get("r1")
+    assert len(rec.messages) == 2
+    assert rec.messages[0].role == "user"
+    assert rec.messages[0].content == "hello"
+    assert rec.messages[1].role == "agent"

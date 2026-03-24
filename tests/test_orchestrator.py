@@ -170,3 +170,81 @@ def test_log_stream_endpoint_is_registered(client):
     """The /logs/stream route should be registered in the app."""
     routes = [r.path for r in client.app.routes if hasattr(r, "path")]
     assert "/logs/stream" in routes
+
+
+# ── Conversation thread (reply) ──────────────────────────────────────────────
+
+
+def test_completed_query_has_messages(client):
+    """Completed query should have initial user + agent messages."""
+    resp = client.post("/query", json={"query": "Show all tables"})
+    data = resp.json()
+    assert data["status"] == "COMPLETED"
+    assert len(data["messages"]) == 2
+    assert data["messages"][0]["role"] == "user"
+    assert data["messages"][0]["content"] == "Show all tables"
+    assert data["messages"][1]["role"] == "agent"
+
+
+def test_reply_to_completed_query(client):
+    """Reply to a completed query should return updated messages."""
+    post_resp = client.post("/query", json={"query": "Show all tables"})
+    request_id = post_resp.json()["request_id"]
+
+    reply_resp = client.post(f"/query/{request_id}/reply", json={"query": "How many rows?"})
+    assert reply_resp.status_code == 200
+    data = reply_resp.json()
+    assert data["status"] == "COMPLETED"
+    assert len(data["messages"]) == 4  # original 2 + reply user + reply agent
+    assert data["messages"][2]["role"] == "user"
+    assert data["messages"][2]["content"] == "How many rows?"
+    assert data["messages"][3]["role"] == "agent"
+
+
+def test_reply_to_pending_query_returns_409(client_approve):
+    """Cannot reply to a query that is not COMPLETED."""
+    post_resp = client_approve.post(
+        "/query", json={"query": "delete from users where id = 5"}
+    )
+    request_id = post_resp.json()["request_id"]
+    assert post_resp.json()["status"] == "PENDING_APPROVAL"
+
+    resp = client_approve.post(f"/query/{request_id}/reply", json={"query": "Why?"})
+    assert resp.status_code == 409
+
+
+def test_reply_not_found(client):
+    """Reply to a nonexistent query should return 404."""
+    resp = client.post("/query/nonexistent-id/reply", json={"query": "hello"})
+    assert resp.status_code == 404
+
+
+def test_reply_builds_conversation(client):
+    """Multiple replies should accumulate messages."""
+    post_resp = client.post("/query", json={"query": "Show all tables"})
+    request_id = post_resp.json()["request_id"]
+
+    client.post(f"/query/{request_id}/reply", json={"query": "How many rows?"})
+    reply2 = client.post(f"/query/{request_id}/reply", json={"query": "Show first 5"})
+    data = reply2.json()
+    assert len(data["messages"]) == 6  # 2 initial + 2 per reply
+
+
+def test_reply_message_cap(client):
+    """Reply should be rejected once the message cap is reached."""
+    from agents.orchestrator_agent import MAX_THREAD_MESSAGES
+    from schemas import Message
+    from store import query_store
+
+    post_resp = client.post("/query", json={"query": "Show all tables"})
+    request_id = post_resp.json()["request_id"]
+    store = query_store
+    # Fill messages up to the cap
+    record = store.get(request_id)
+    while len(record.messages) < MAX_THREAD_MESSAGES:
+        store.add_message(request_id, Message(role="user", content="filler"))
+        record = store.get(request_id)
+
+    resp = client.post(f"/query/{request_id}/reply", json={"query": "one more"})
+    assert resp.status_code == 409
+    assert "message limit" in resp.json()["detail"]
