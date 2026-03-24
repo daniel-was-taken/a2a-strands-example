@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +26,16 @@ class ActivityEvent(BaseModel):
     detail: str = ""
 
 
+class Message(BaseModel):
+    """Single message in a query conversation thread."""
+
+    role: Literal["user", "agent"]
+    content: str
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
 
@@ -36,6 +47,7 @@ class QueryResponse(BaseModel):
     query: str = ""
     result: str | None = None
     review_verdict: str | None = None
+    messages: list[Message] = Field(default_factory=list)
     events: list[ActivityEvent] = Field(default_factory=list)
     created_at: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

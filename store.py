@@ -12,7 +12,7 @@ import os
 import threading
 from typing import Protocol
 
-from schemas import ActivityEvent, QueryResponse, RequestStatus
+from schemas import ActivityEvent, Message, QueryResponse, RequestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ class QueryStore(Protocol):
     def get_by_approval_id(self, approval_id: str) -> QueryResponse | None: ...
     def list_all(self) -> list[QueryResponse]: ...
     def add_event(self, request_id: str, event: ActivityEvent) -> None: ...
+    def add_message(self, request_id: str, message: Message) -> None: ...
     def update_status(
         self,
         request_id: str,
@@ -70,6 +71,12 @@ class InMemoryStore:
             rec = self._records.get(request_id)
             if rec:
                 rec.events.append(event)
+
+    def add_message(self, request_id: str, message: Message) -> None:
+        with self._lock:
+            rec = self._records.get(request_id)
+            if rec:
+                rec.messages.append(message)
 
     def update_status(
         self,
