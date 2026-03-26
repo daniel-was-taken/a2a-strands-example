@@ -8,8 +8,10 @@ services:
     environment:
       DATABASE_MODE: "a2a"
       DATABASE_AGENT_URL: "http://db-agent:8001/"
+      GRAPH_AGENT_URL: "http://graph-agent:8002/"
     depends_on:
       - db-agent
+      - graph-agent
     restart: unless-stopped
 
   db-agent:
@@ -18,4 +20,12 @@ services:
     env_file: .env
     ports:
       - "8001:8001"
+    restart: unless-stopped
+
+  graph-agent:
+    build: .
+    command: ["python", "-m", "agents.example_agent"]
+    env_file: .env
+    ports:
+      - "8002:8002"
     restart: unless-stopped
