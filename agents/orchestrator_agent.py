@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 DATABASE_MODE = os.environ.get("DATABASE_MODE", "a2a")
 DATABASE_AGENT_URL = os.environ.get("DATABASE_AGENT_URL", "http://localhost:8001/")
+GRAPH_AGENT_URL = os.environ.get("GRAPH_AGENT_URL", "http://localhost:8002/")
 ORCHESTRATOR_PORT = int(os.environ.get("ORCHESTRATOR_PORT", "8000"))
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 API_KEY = os.environ.get("API_KEY", "")
@@ -52,10 +53,14 @@ DESTRUCTIVE_KEYWORDS = {"delete", "remove", "drop", "truncate", "destroy"}
 MAX_THREAD_MESSAGES = 20
 
 _A2A_SYSTEM_PROMPT = """
-You are the Orchestrator Agent. You receive database-related questions from users
-and forward them to the Database Agent for execution.
+You are the Orchestrator Agent. You receive requests from users and route them
+to the appropriate specialist agent:
 
-Use the available A2A tools to communicate with the Database Agent.
+- **Database Agent**: For all database-related operations — schema queries, inserts, deletes, and data retrieval.
+- **Graph Agent**: For general reasoning, multi-step workflows, analysis, implementation, and review tasks.
+
+Use the available A2A tools to communicate with both agents.
+When asked what agents are available, list all connected agents and their capabilities.
 Keep responses clear and relay the results back accurately.
 """
 
@@ -76,7 +81,7 @@ def _get_agent() -> Agent:
         if DATABASE_MODE == "a2a":
             from strands_tools.a2a_client import A2AClientToolProvider
 
-            provider = A2AClientToolProvider(known_agent_urls=[DATABASE_AGENT_URL])
+            provider = A2AClientToolProvider(known_agent_urls=[DATABASE_AGENT_URL, GRAPH_AGENT_URL])
             _agent = Agent(
                 model=create_model(),
                 system_prompt=_A2A_SYSTEM_PROMPT,
@@ -164,12 +169,39 @@ def _add_event(request_id: str, agent: str, action: str, detail: str = "") -> No
     )
 
 
+# Map agent URLs to display names
+_AGENT_NAMES = {
+    DATABASE_AGENT_URL: "Database Agent",
+    GRAPH_AGENT_URL: "Graph Agent",
+}
+
+
+def _extract_routed_agents(agent: Agent) -> list[str]:
+    """Inspect agent messages to find which A2A agents were called."""
+    agents_used = []
+    for msg in reversed(agent.messages):
+        for block in msg.get("content", []):
+            if isinstance(block, dict) and "toolUse" in block:
+                tool = block["toolUse"]
+                if tool.get("name") == "a2a_send_message":
+                    url = tool.get("input", {}).get("target_agent_url", "")
+                    name = _AGENT_NAMES.get(url, url)
+                    if name not in agents_used:
+                        agents_used.append(name)
+    return agents_used
+
+
 def _execute_query(request_id: str, query: str) -> QueryResponse:
-    """Forward a query to the Database Agent and return the updated record."""
-    _add_event(request_id, "orchestrator", "forwarding", "Sending query to Database Agent")
+    """Forward a query to the appropriate agent and return the updated record."""
+    _add_event(request_id, "orchestrator", "forwarding", "Routing query to specialist agent")
     try:
         agent = _get_agent()
         response = str(agent(query))
+
+        routed = _extract_routed_agents(agent)
+        for name in routed:
+            _add_event(request_id, name.lower().replace(" ", "_"), "executed", f"Handled by {name}")
+
         _add_event(request_id, "orchestrator", "completed", "Query executed successfully")
         # Populate the initial conversation messages
         query_store.add_message(request_id, Message(role="user", content=query))

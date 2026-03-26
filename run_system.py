@@ -25,6 +25,13 @@ def start_db_agent():
     serve()
 
 
+def start_graph_agent():
+    """Launch the Graph Agent A2A server."""
+    from agents.example_agent import serve
+
+    serve()
+
+
 def start_orchestrator():
     """Launch the Orchestrator Agent FastAPI server."""
     from agents.orchestrator_agent import serve
@@ -46,14 +53,17 @@ def main():
 
     print("Starting system (A2A mode)...")
     print("  - Database Agent    (A2A Server) -> http://localhost:8001")
+    print("  - Graph Agent       (A2A Server) -> http://localhost:8002")
     print("  - Orchestrator Agent (FastAPI)   -> http://localhost:8000")
     print()
 
     db_process = multiprocessing.Process(target=start_db_agent, name="db-agent")
+    graph_process = multiprocessing.Process(target=start_graph_agent, name="graph-agent")
     orch_process = multiprocessing.Process(target=start_orchestrator, name="orchestrator")
 
     db_process.start()
-    time.sleep(2)  # Let the Database Agent start before the Orchestrator
+    graph_process.start()
+    time.sleep(2)  # Let the A2A agents start before the Orchestrator
     orch_process.start()
 
     print("\nAll components started. Send requests to http://localhost:8000/query")
@@ -61,12 +71,15 @@ def main():
 
     try:
         db_process.join()
+        graph_process.join()
         orch_process.join()
     except KeyboardInterrupt:
         print("\nShutting down...")
         db_process.terminate()
+        graph_process.terminate()
         orch_process.terminate()
         db_process.join(timeout=5)
+        graph_process.join(timeout=5)
         orch_process.join(timeout=5)
         print("Stopped.")
 
