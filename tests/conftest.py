@@ -4,28 +4,63 @@ Run:  pytest tests/ -v
 """
 
 import os
+import tempfile
+from pathlib import Path
+
+# Set test defaults BEFORE any module imports trigger Settings() creation.
+os.environ.setdefault("DATABASE_MODE", "direct")
+os.environ.setdefault("GOOGLE_API_KEY", "test-google-key")
+
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
+
+
+# ── Test agents.yaml ─────────────────────────────────────────────────────────
+
+_TEST_AGENTS_CONFIG = {
+    "agents": [
+        {
+            "name": "Test MCP Agent",
+            "type": "mcp",
+            "port": 9001,
+            "description": "Test database agent",
+            "mcp_url": "https://example.com/mcp",
+            "tools": ["tool_a"],
+            "system_prompt": "You are a test agent.",
+            "skills": [
+                {
+                    "id": "test-skill",
+                    "name": "Test",
+                    "description": "A test skill",
+                    "tags": ["test"],
+                }
+            ],
+        },
+    ]
+}
+
+# Write test config to a temp file at import time so settings can reference it.
+_test_config_dir = tempfile.mkdtemp()
+_test_config_path = str(Path(_test_config_dir) / "agents.yaml")
+Path(_test_config_path).write_text(yaml.dump(_TEST_AGENTS_CONFIG))
+os.environ.setdefault("AGENTS_CONFIG", _test_config_path)
 
 
 @pytest.fixture(autouse=True)
 def _mock_env(monkeypatch):
-    """Ensure required env vars are set for tests."""
-    monkeypatch.setenv("NEON_API_KEY", "test-key")
-    monkeypatch.setenv("NEON_PROJECT_ID", "test-project")
-    monkeypatch.setenv("NEON_DATABASE", "test-db")
-    monkeypatch.setenv("NEON_BRANCH_ID", "main")
+    """Ensure required env vars are set for tests (runtime reads)."""
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
-    monkeypatch.setenv("DATABASE_AGENT_URL", "http://localhost:8001/")
     monkeypatch.setenv("DATABASE_MODE", "direct")
+    monkeypatch.setenv("AGENTS_CONFIG", _test_config_path)
 
 
 @pytest.fixture(autouse=True)
 def _clear_store():
     """Reset the in-memory store between tests."""
-    from store import query_store
+    from common.store import query_store
 
     query_store._records.clear()
 
@@ -42,15 +77,15 @@ def _reset_agent():
 
 def _make_mock_agents(review_return):
     """Shared helper to build mock patches with a given review_delete_request return."""
-    mock_agent = MagicMock()
-    mock_agent.return_value = "Test agent response"
+    mock_agent = MagicMock(return_value="Test agent response")
+    mock_agent.messages = []
 
     mock_model = MagicMock()
 
     return (
         mock_agent,
         patch("agents.model.create_model", return_value=mock_model),
-        patch("agents.db_agent.create_database_agent", return_value=mock_agent),
+        patch("agents.mcp_agent.create_mcp_agent", return_value=mock_agent),
         patch(
             "agents.orchestrator_agent.create_safety_reviewer",
             return_value=mock_agent,
@@ -73,9 +108,7 @@ def mock_agents():
 @pytest.fixture()
 def mock_agents_approve():
     """Patch with safety reviewer that APPROVES destructive queries."""
-    mock_agent, *patches = _make_mock_agents(
-        (True, "APPROVE: clearly scoped request")
-    )
+    mock_agent, *patches = _make_mock_agents((True, "APPROVE: clearly scoped request"))
     with patches[0], patches[1], patches[2], patches[3]:
         yield mock_agent
 
