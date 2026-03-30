@@ -7,25 +7,82 @@ services:
       - "8000:8000"
     environment:
       DATABASE_MODE: "a2a"
-      DATABASE_AGENT_URL: "http://db-agent:8001/"
-      GRAPH_AGENT_URL: "http://graph-agent:8002/"
+      AGENTS_CONFIG: "/app/agents.yaml"
+    volumes:
+      - ./agents.yaml:/app/agents.yaml:ro
     depends_on:
-      - db-agent
+      - db-reader
+      - db-writer
+      - db-deleter
       - graph-agent
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
-  db-agent:
+  db-reader:
     build: .
-    command: ["python", "-m", "agents.db_agent"]
+    command: ["python", "-m", "agents.mcp_agent", "--config", "/app/agents.yaml", "--agent", "Database Reader"]
     env_file: .env
     ports:
       - "8001:8001"
+    volumes:
+      - ./agents.yaml:/app/agents.yaml:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/.well-known/agent-card.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  db-writer:
+    build: .
+    command: ["python", "-m", "agents.mcp_agent", "--config", "/app/agents.yaml", "--agent", "Database Writer"]
+    env_file: .env
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./agents.yaml:/app/agents.yaml:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/.well-known/agent-card.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  db-deleter:
+    build: .
+    command: ["python", "-m", "agents.mcp_agent", "--config", "/app/agents.yaml", "--agent", "Database Deleter"]
+    env_file: .env
+    ports:
+      - "8004:8004"
+    volumes:
+      - ./agents.yaml:/app/agents.yaml:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/.well-known/agent-card.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   graph-agent:
     build: .
-    command: ["python", "-m", "agents.example_agent"]
+    command: ["python", "-m", "agents.graph_agent"]
     env_file: .env
     ports:
       - "8002:8002"
+    volumes:
+      - ./agents.yaml:/app/agents.yaml:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/.well-known/agent-card.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
