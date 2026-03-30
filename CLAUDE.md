@@ -1,0 +1,126 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+A2A (Agent-to-Agent) multi-agent system built with Strands Agents SDK. Agents are declared in `agents.yaml` and spun up dynamically — no Python code changes needed to add a new MCP-backed agent. The orchestrator routes user queries to specialist agents via A2A, with safety review and human-in-the-loop approval for destructive operations.
+
+**LLM:** Google Gemini (configurable via `GEMINI_MODEL_ID`, default `gemini-3.5-flash`)
+**MCP:** Any MCP server (configured per-agent in `agents.yaml`)
+**Framework:** FastAPI (orchestrator), Strands A2A SDK (specialist agents)
+
+## Commands
+
+```bash
+# Install dependencies
+pip install -e ".[dev]"           # dev (includes test/lint tools)
+pip install -e ".[otel]"          # with OpenTelemetry tracing
+
+# Run the system
+python run_system.py              # A2A mode: orchestrator + agents from agents.yaml
+DATABASE_MODE=direct python run_system.py  # Direct mode: single process, no A2A
+
+# Run individual agents
+python -m agents.orchestrator_agent   # Port 8000
+python -m agents.mcp_agent --config agents.yaml --agent "Database Reader"  # MCP agent
+python -m agents.graph_agent          # Port 8002 (custom agent)
+
+# Docker
+docker compose up --build
+
+# Tests
+pytest                            # All tests
+pytest tests/test_smoke.py        # Single file
+pytest tests/test_orchestrator.py::test_submit_non_destructive_query  # Single test
+pytest -x                         # Stop on first failure
+
+# Lint & format
+ruff check .                      # Lint
+ruff check --fix .                # Auto-fix
+ruff format .                     # Format
+
+# Type checking
+mypy agents/ tools/ mcp_client/ common/ db/
+```
+
+## Architecture
+
+### Agent Topology
+
+```
+User → Orchestrator (8000) → A2A → [Agents declared in agents.yaml]
+                                    ├─ MCP Agent (config-driven, any MCP server)
+                                    └─ Custom Agent (Python factory, e.g. Graph Agent)
+```
+
+### Two Operating Modes
+
+- **A2A mode** (default): Orchestrator communicates with specialist agents via A2A protocol over HTTP. Each agent runs as a separate process/container.
+- **Direct mode** (`DATABASE_MODE=direct`): Single process. The first MCP agent from `agents.yaml` is loaded in-process, no A2A networking. Custom agents (e.g. Graph Agent) unavailable.
+
+### Orchestrator (`agents/orchestrator_agent.py`)
+
+FastAPI app that receives user queries, runs safety review on destructive operations (DELETE/DROP/TRUNCATE), and routes to specialist agents. Manages query lifecycle with statuses: `PENDING_APPROVAL → COMPLETED | RECOMMENDED_REJECT | REJECTED | FAILED`. The agent singleton is lazy-loaded and thread-safe. Agent invocations use `asyncio.to_thread` to avoid blocking the event loop.
+
+### MCP Agents (config-driven) (`agents/mcp_agent.py`)
+
+Generic factory that creates Strands Agents from `agents.yaml`. Each YAML entry with `type: mcp` declares a name, description, system prompt, MCP server URL, and auth block. The factory connects to the MCP server, builds a Strands Agent with the resolved tools, and serves it via `serve_agent()`.
+
+**`agents.yaml` format** — two agent types:
+- `type: mcp` — config-driven: MCP server URL, auth (env-var references), system prompt for tool filtering
+- `type: custom` — Python factory function (e.g. Graph Agent), referenced by module path
+
+**CLI:** `python -m agents.mcp_agent --config agents.yaml --agent "<name>"` starts one agent by name.
+
+### Graph Agent (`agents/graph_agent.py`)
+
+A2A server (via `serve_agent()`) using Strands GraphBuilder for multi-step reasoning: analyze → implement → review, with conditional loops back to implement if review says "needs revision" (max 5 iterations). Uses `callback_handler=None` on all sub-agents.
+
+### MCP Client (`mcp_client/client.py`)
+
+Generic MCP client factory with a connection registry keyed by URL. Multiple agents sharing the same MCP server URL reuse one connection. Same reconnect pattern (3 attempts, exponential backoff) but parameterised by URL and auth from `agents.yaml`.
+
+### Safety Review (`tools/safety_reviewer.py`)
+
+LLM-based reviewer that evaluates destructive queries. Outputs `APPROVE: reason` or `REJECT: reason`. Triggered when query matches destructive keywords.
+
+### Shared Utilities (`common/`)
+
+- `config.py` — Pydantic Settings: single source of truth for all env vars. No longer has Neon/per-agent fields; includes `agents_config: str` pointing to the YAML agent definitions file
+- `server.py` — `serve_agent()` helper: starts any Strands agent as an A2A server with auth, CORS, structured logging, and tracing. All specialist agents use this instead of duplicating server boilerplate.
+- `schemas.py` — Pydantic request/response models (QueryResponse, Message, ActivityEvent, etc.)
+- `store.py` — QueryStore protocol + InMemoryStore (swap via `STORE_BACKEND` env var)
+- `log_stream.py` — SSE broadcaster for real-time log streaming
+- `auth.py` — `AgentAuthMiddleware`: X-Agent-API-Key validation on A2A agents (no-op when key is empty; always exempt: `/.well-known/agent-card.json`, `/health`, `/ready`)
+- `logging_setup.py` — Structured JSON logging with correlation fields
+- `task_store.py` — Thread-safe in-memory A2A TaskStore (swap for Redis/DynamoDB in multi-replica deployments)
+- `tracing.py` — OpenTelemetry OTLP setup (no-op when endpoint not configured)
+
+### Model Configuration (`agents/model.py`)
+
+All agents share `create_model()` which returns a `GeminiModel`. Uses `GOOGLE_API_KEY` for local dev (Google AI Studio) or Vertex AI via ADC when `GOOGLE_CLOUD_PROJECT` is set.
+
+## Testing Patterns
+
+- All tests mock LLM and database calls completely — no real API keys needed
+- `conftest.py` sets env vars at import time (before `Settings()` singleton is created) and also via `monkeypatch` per-test
+- Two fixture variants: `mock_agents` (safety reviewer REJECTS) and `mock_agents_approve` (safety reviewer APPROVES)
+- Agent mock patches `agents.mcp_agent.create_mcp_agent`; uses `MagicMock` (not `AsyncMock`) because `Agent.__call__` is synchronous, dispatched via `asyncio.to_thread`
+- Test YAML config is written to a temp file and pointed to via `AGENTS_CONFIG`
+- Agent singleton is reset between tests via `_reset_agent` fixture
+- Async tests run automatically via `pytest-asyncio` with `asyncio_mode = "auto"`
+
+## Configuration
+
+All configuration flows through `common/config.py` (Pydantic Settings) and `.env`. Copy `.env.example` to `.env` for local development. Required vars: `AGENTS_CONFIG` (path to `agents.yaml`, defaults to `agents.yaml`), and either `GOOGLE_API_KEY` or `GOOGLE_CLOUD_PROJECT`. MCP server credentials (API keys, project IDs, etc.) are referenced by `agents.yaml` auth blocks and should be set as env vars.
+
+## Code Style
+
+- Python 3.11+, line length 100
+- Ruff for linting/formatting (config in `pyproject.toml`)
+- Mypy strict mode (excludes tests)
+- Known first-party packages for import sorting: `agents`, `common`, `db`, `mcp_client`, `tools`
+- Ruff rule sets: `E`, `F`, `W`, `I`, `UP`, `B`, `C4`, `SIM`
+- Ruff ignores: `B008` (FastAPI `Depends()` pattern), `UP007` (keep `Optional[]` over `X | Y`)
+- `TCH` rules intentionally excluded — causes false positives with Protocol definitions and Pydantic models
