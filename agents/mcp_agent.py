@@ -16,7 +16,7 @@ from a2a.types import AgentSkill
 from strands import Agent
 
 from agents.model import create_model
-from mcp_client.client import get_mcp_client
+from mcp_client.client import create_mcp_client
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def create_mcp_agent(agent_config: dict) -> Agent:
     Args:
         agent_config: A single agent entry from agents.yaml.
     """
-    client = get_mcp_client(
+    client = create_mcp_client(
         mcp_url=agent_config["mcp_url"],
         auth=agent_config.get("auth"),
     )

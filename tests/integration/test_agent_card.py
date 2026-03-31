@@ -30,7 +30,7 @@ def agent_app(mock_env):
 
     with (
         patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.get_mcp_client", return_value=mock_mcp),
+        patch("mcp_client.client.create_mcp_client", return_value=mock_mcp),
         patch("common.logging_setup.configure_logging"),
         patch("common.tracing.configure_tracing"),
     ):
@@ -61,6 +61,7 @@ def agent_app(mock_env):
             version="1.0.0",
             skills=skills,
             task_store=InMemoryA2ATaskStore(),
+            enable_a2a_compliant_streaming=True,
         )
         return server.to_fastapi_app()
 

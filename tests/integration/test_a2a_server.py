@@ -29,7 +29,7 @@ def a2a_app(mock_env):
 
     with (
         patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.get_mcp_client", return_value=mock_client),
+        patch("mcp_client.client.create_mcp_client", return_value=mock_client),
         patch("common.logging_setup.configure_logging"),
         patch("common.tracing.configure_tracing"),
     ):
@@ -59,6 +59,7 @@ def a2a_app(mock_env):
                 )
             ],
             task_store=InMemoryA2ATaskStore(),
+            enable_a2a_compliant_streaming=True,
         )
         return server.to_fastapi_app()
 
@@ -98,7 +99,7 @@ async def test_auth_middleware_blocks_without_key():
 
     with (
         patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.get_mcp_client", return_value=mock_client),
+        patch("mcp_client.client.create_mcp_client", return_value=mock_client),
     ):
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
@@ -120,6 +121,7 @@ async def test_auth_middleware_blocks_without_key():
             version="1.0.0",
             skills=[AgentSkill(id="t", name="T", description="t", tags=["t"])],
             task_store=InMemoryA2ATaskStore(),
+            enable_a2a_compliant_streaming=True,
         )
         app = server.to_fastapi_app()
         app.add_middleware(AgentAuthMiddleware, api_key="secret-key")
@@ -140,7 +142,7 @@ async def test_auth_middleware_allows_agent_card_without_key():
 
     with (
         patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.get_mcp_client", return_value=mock_client),
+        patch("mcp_client.client.create_mcp_client", return_value=mock_client),
     ):
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
@@ -162,6 +164,7 @@ async def test_auth_middleware_allows_agent_card_without_key():
             version="1.0.0",
             skills=[AgentSkill(id="t", name="T", description="t", tags=["t"])],
             task_store=InMemoryA2ATaskStore(),
+            enable_a2a_compliant_streaming=True,
         )
         app = server.to_fastapi_app()
         app.add_middleware(AgentAuthMiddleware, api_key="secret-key")

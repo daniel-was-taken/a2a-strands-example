@@ -18,7 +18,7 @@ def test_create_mcp_agent_returns_agent():
     }
 
     with (
-        patch("agents.mcp_agent.get_mcp_client", return_value=mock_client),
+        patch("agents.mcp_agent.create_mcp_client", return_value=mock_client),
         patch("agents.mcp_agent.create_model", return_value=mock_model),
         patch("agents.mcp_agent.Agent") as mock_agent_cls,
     ):
@@ -37,7 +37,7 @@ def test_create_mcp_agent_returns_agent():
 
 
 def test_create_mcp_agent_passes_auth():
-    """create_mcp_agent should forward auth config to get_mcp_client."""
+    """create_mcp_agent should forward auth config to create_mcp_client."""
     mock_client = MagicMock()
 
     config = {
@@ -47,7 +47,7 @@ def test_create_mcp_agent_passes_auth():
     }
 
     with (
-        patch("agents.mcp_agent.get_mcp_client", return_value=mock_client) as mock_get,
+        patch("agents.mcp_agent.create_mcp_client", return_value=mock_client) as mock_get,
         patch("agents.mcp_agent.create_model", return_value=MagicMock()),
         patch("agents.mcp_agent.Agent"),
     ):
@@ -69,7 +69,7 @@ def test_create_mcp_agent_default_system_prompt():
     }
 
     with (
-        patch("agents.mcp_agent.get_mcp_client", return_value=MagicMock()),
+        patch("agents.mcp_agent.create_mcp_client", return_value=MagicMock()),
         patch("agents.mcp_agent.create_model", return_value=MagicMock()),
         patch("agents.mcp_agent.Agent") as mock_agent_cls,
     ):
