@@ -1,3 +1,4 @@
+# agents/orchestrator_agent.py
 """Orchestrator Agent -- FastAPI app on port 8000.
 
 Receives user requests via REST and routes them to specialist agents
@@ -30,14 +31,15 @@ from common.log_stream import broadcaster
 from common.log_stream import install as install_sse_handler
 from common.schemas import (
     ActivityEvent,
+    Conversation,
+    ConversationStatus,
+    ConversationSummary,
     ErrorResponse,
     HealthResponse,
     Message,
-    QueryRequest,
-    QueryResponse,
-    RequestStatus,
+    MessageRequest,
 )
-from common.store import query_store
+from common.store import conversation_store
 from tools.safety_reviewer import create_safety_reviewer, review_delete_request
 
 logger = logging.getLogger(__name__)
@@ -55,27 +57,20 @@ def _load_agents_config() -> list[dict]:
 
 
 def _agent_url(cfg: dict) -> str:
-    """Derive the A2A URL for an agent from its config.
-
-    Uses ``host`` from config when set, otherwise ``localhost``.  In Docker
-    Compose, set ``host`` per agent to the service name (e.g. ``db-reader``).
-    """
+    """Derive the A2A URL for an agent from its config."""
     host = cfg.get("host", "localhost")
     return f"http://{host}:{cfg['port']}/"
 
 
 def _build_agent_urls(agents_config: list[dict]) -> list[str]:
-    """Build the list of agent URLs from config."""
     return [_agent_url(cfg) for cfg in agents_config]
 
 
 def _build_agent_names(agents_config: list[dict]) -> dict[str, str]:
-    """Build URL -> display name mapping from config."""
     return {_agent_url(cfg): cfg["name"] for cfg in agents_config}
 
 
 def _build_system_prompt(agents_config: list[dict]) -> str:
-    """Build the orchestrator system prompt dynamically from agents config."""
     agent_lines = []
     for cfg in agents_config:
         url = _agent_url(cfg)
@@ -105,7 +100,6 @@ _agent: Agent | None = None
 
 
 def _get_agent() -> Agent:
-    """Return the lazily initialised orchestrator agent singleton."""
     global _agent
     if _agent is not None:
         return _agent
@@ -170,7 +164,6 @@ async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    """Reject requests without a valid API key (when API_KEY is configured)."""
     exempt_paths = ("/health", "/ready", "/", "/docs", "/openapi.json")
     if (
         settings.api_key
@@ -194,28 +187,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve frontend static assets (CSS, JS) under /static
 _FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 if _FRONTEND_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(_FRONTEND_DIR)), name="static")
 
 
 def _needs_safety_review(user_input: str) -> bool:
-    """Return True if the query contains destructive keywords."""
     words = set(user_input.lower().split())
     return bool(words & DESTRUCTIVE_KEYWORDS)
 
 
-def _add_event(request_id: str, agent: str, action: str, detail: str = "") -> None:
-    """Append an activity event to a stored query record."""
-    query_store.add_event(
-        request_id,
+def _add_event(conversation_id: str, agent: str, action: str, detail: str = "") -> None:
+    conversation_store.add_event(
+        conversation_id,
         ActivityEvent(agent=agent, action=action, detail=detail),
     )
 
 
 def _extract_routed_agents(agent: Agent) -> list[str]:
-    """Inspect agent messages to find which A2A agents were called."""
     try:
         agents_config = _load_agents_config()
         agent_names = _build_agent_names(agents_config)
@@ -235,63 +224,52 @@ def _extract_routed_agents(agent: Agent) -> list[str]:
     return agents_used
 
 
-async def _execute_query(request_id: str, query: str) -> QueryResponse:
-    """Forward a query to the appropriate agent and return the updated record."""
-    _add_event(request_id, "orchestrator", "forwarding", "Routing query to specialist agent")
+async def _execute_message(conversation_id: str) -> Conversation:
+    """Reset agent context, rebuild from conversation messages, execute, store response."""
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    _add_event(conversation_id, "orchestrator", "forwarding", "Routing to specialist agent")
     try:
         agent = _get_agent()
-        # Agent.__call__ is synchronous — run in thread pool to avoid blocking the event loop.
-        result = await asyncio.to_thread(agent, query)
+        agent.messages = []  # Clean slate — no cross-conversation leakage
+
+        recent = conv.messages[-MAX_THREAD_MESSAGES:]
+        if len(recent) <= 1:
+            prompt = recent[0].content
+        else:
+            context_parts = []
+            for msg in recent:
+                label = "User" if msg.role == "user" else "Agent"
+                context_parts.append(f"{label}: {msg.content}")
+            prompt = "Previous conversation:\n" + "\n".join(context_parts)
+
+        result = await asyncio.to_thread(agent, prompt)
         response = str(result)
 
         routed = _extract_routed_agents(agent)
         for name in routed:
-            _add_event(request_id, name.lower().replace(" ", "_"), "executed", f"Handled by {name}")
+            _add_event(
+                conversation_id,
+                name.lower().replace(" ", "_"),
+                "executed",
+                f"Handled by {name}",
+            )
 
-        _add_event(request_id, "orchestrator", "completed", "Query executed successfully")
-        # Populate the initial conversation messages
-        query_store.add_message(request_id, Message(role="user", content=query))
-        query_store.add_message(request_id, Message(role="agent", content=response))
-        rec = query_store.update_status(request_id, RequestStatus.COMPLETED, result=response)
-        return rec  # type: ignore[return-value]
-    except Exception:
-        logger.exception("Query execution failed for request %s", request_id)
-        _add_event(request_id, "orchestrator", "failed", "Query execution failed")
-        rec = query_store.update_status(
-            request_id, RequestStatus.FAILED, result="Request failed. Please try again."
+        _add_event(conversation_id, "orchestrator", "completed", "Message processed successfully")
+        conversation_store.add_message(
+            conversation_id, Message(role="agent", content=response)
         )
-        return rec  # type: ignore[return-value]
-
-
-async def _execute_reply(request_id: str, reply: str, record: QueryResponse) -> QueryResponse:
-    """Handle a follow-up reply within an existing query thread."""
-    _add_event(request_id, "orchestrator", "reply", f"Follow-up: {reply[:120]}")
-    query_store.add_message(request_id, Message(role="user", content=reply))
-    try:
-        agent = _get_agent()
-        # Build context from previous messages (capped)
-        messages = record.messages[-MAX_THREAD_MESSAGES:]
-        context_parts = []
-        for msg in messages:
-            label = "User" if msg.role == "user" else "Agent"
-            context_parts.append(f"{label}: {msg.content}")
-        context_parts.append(f"User: {reply}")
-        prompt = "Previous conversation:\n" + "\n".join(context_parts)
-
-        # Agent.__call__ is synchronous — run in thread pool to avoid blocking the event loop.
-        result = await asyncio.to_thread(agent, prompt)
-        response = str(result)
-        query_store.add_message(request_id, Message(role="agent", content=response))
-        _add_event(request_id, "orchestrator", "reply_completed", "Follow-up answered")
-        rec = query_store.update_status(request_id, RequestStatus.COMPLETED, result=response)
-        return rec  # type: ignore[return-value]
+        return conversation_store.get(conversation_id)  # type: ignore[return-value]
     except Exception:
-        logger.exception("Reply execution failed for request %s", request_id)
-        _add_event(request_id, "orchestrator", "failed", "Follow-up execution failed")
-        err_msg = "Follow-up failed. Please try again."
-        query_store.add_message(request_id, Message(role="agent", content=err_msg))
-        rec = query_store.update_status(request_id, RequestStatus.COMPLETED, result=err_msg)
-        return rec  # type: ignore[return-value]
+        logger.exception("Message execution failed for conversation %s", conversation_id)
+        _add_event(conversation_id, "orchestrator", "failed", "Message execution failed")
+        conversation_store.add_message(
+            conversation_id,
+            Message(role="agent", content="Something went wrong. Please try again."),
+        )
+        return conversation_store.get(conversation_id)  # type: ignore[return-value]
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -304,7 +282,6 @@ def health() -> HealthResponse:
 
 @app.get("/ready", response_model=HealthResponse)
 def readiness() -> HealthResponse:
-    """Readiness probe -- confirms the agent can be initialised."""
     try:
         _get_agent()
     except Exception as exc:
@@ -314,8 +291,6 @@ def readiness() -> HealthResponse:
 
 @app.get("/logs/stream")
 async def log_stream():
-    """SSE endpoint that streams log messages to connected clients."""
-
     async def _generate():
         async with broadcaster.subscribe() as queue:
             while True:
@@ -325,116 +300,150 @@ async def log_stream():
     return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
-@app.post("/query", response_model=QueryResponse, status_code=201)
-async def submit_query(payload: QueryRequest) -> QueryResponse:
-    """Accept a user query, optionally run safety review, and route to a specialist agent."""
-    request_id = str(uuid4())
-    query = payload.query
+@app.post("/conversations", response_model=Conversation, status_code=201)
+def create_conversation() -> Conversation:
+    conv = Conversation(id=str(uuid4()), title="New conversation")
+    conversation_store.create(conv)
+    return conv
 
-    # Create the record in the store immediately
-    record = QueryResponse(
-        request_id=request_id,
-        status=RequestStatus.COMPLETED,
-        query=query,
-    )
-    query_store.save(record)
-    _add_event(request_id, "orchestrator", "received", f"Query received: {query[:120]}")
 
-    if _needs_safety_review(query):
-        _add_event(request_id, "safety_reviewer", "review_started", "Evaluating destructive query")
+@app.get("/conversations", response_model=list[ConversationSummary])
+def list_conversations() -> list[ConversationSummary]:
+    conversations = conversation_store.list_all()
+    return [
+        ConversationSummary(
+            id=c.id,
+            title=c.title,
+            status=c.status,
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+        )
+        for c in conversations
+    ]
+
+
+@app.get("/conversations/{conversation_id}", response_model=Conversation)
+def get_conversation(conversation_id: str) -> Conversation:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conv
+
+
+@app.delete("/conversations/{conversation_id}", status_code=204)
+def delete_conversation(conversation_id: str) -> None:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conversation_store.delete(conversation_id)
+
+
+@app.post("/conversations/{conversation_id}/messages", response_model=Conversation)
+async def send_message(conversation_id: str, payload: MessageRequest) -> Conversation:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.status == ConversationStatus.AWAITING_APPROVAL:
+        raise HTTPException(status_code=409, detail="Conversation is awaiting approval")
+
+    content = payload.content
+    conversation_store.add_message(conversation_id, Message(role="user", content=content))
+
+    # Update title from first message
+    conv = conversation_store.get(conversation_id)  # type: ignore[assignment]
+    if conv.title == "New conversation":
+        title = content[:50] + ("..." if len(content) > 50 else "")
+        conversation_store.update(conversation_id, title=title)
+
+    _add_event(conversation_id, "orchestrator", "received", f"Message received: {content[:120]}")
+
+    if _needs_safety_review(content):
+        _add_event(
+            conversation_id, "safety_reviewer", "review_started", "Evaluating destructive query"
+        )
         safety_reviewer = create_safety_reviewer()
-        is_approved, verdict = review_delete_request(safety_reviewer, query)
-        _add_event(request_id, "safety_reviewer", "review_completed", verdict)
+        is_approved, verdict = review_delete_request(safety_reviewer, content)
+        _add_event(conversation_id, "safety_reviewer", "review_completed", verdict)
 
+        approval_id = token_hex(4)
         if not is_approved:
-            query_store.update_status(
-                request_id,
-                RequestStatus.RECOMMENDED_REJECT,
+            conversation_store.update(
+                conversation_id,
+                status=ConversationStatus.AWAITING_APPROVAL,
                 review_verdict=verdict,
+                review_recommended_reject=True,
+                pending_query=content,
+                approval_id=approval_id,
             )
             _add_event(
-                request_id,
+                conversation_id,
                 "orchestrator",
                 "recommended_reject",
                 "Safety reviewer recommends rejection",
             )
-            return query_store.get(request_id)  # type: ignore[return-value]
+        else:
+            conversation_store.update(
+                conversation_id,
+                status=ConversationStatus.AWAITING_APPROVAL,
+                review_verdict=verdict,
+                review_recommended_reject=False,
+                pending_query=content,
+                approval_id=approval_id,
+            )
+            _add_event(
+                conversation_id, "orchestrator", "pending_approval", "Awaiting human confirmation"
+            )
 
-        # Approved by safety reviewer -> park for human confirmation
-        approval_id = token_hex(4)
-        query_store.update_status(
-            request_id,
-            RequestStatus.PENDING_APPROVAL,
-            review_verdict=verdict,
-            approval_id=approval_id,
-        )
-        _add_event(request_id, "orchestrator", "pending_approval", "Awaiting human confirmation")
-        return query_store.get(request_id)  # type: ignore[return-value]
+        return conversation_store.get(conversation_id)  # type: ignore[return-value]
 
-    # Non-destructive -> execute immediately
-    return await _execute_query(request_id, query)
-
-
-@app.get("/queries", response_model=list[QueryResponse])
-def list_queries() -> list[QueryResponse]:
-    """Return all stored queries (newest first)."""
-    return query_store.list_all()
+    return await _execute_message(conversation_id)
 
 
-@app.get("/queries/{request_id}", response_model=QueryResponse)
-def get_query(request_id: str) -> QueryResponse:
-    """Return a single query by its request_id."""
-    record = query_store.get(request_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Query not found")
-    return record
+@app.post("/conversations/{conversation_id}/approve", response_model=Conversation)
+async def approve_conversation(conversation_id: str) -> Conversation:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.status != ConversationStatus.AWAITING_APPROVAL:
+        raise HTTPException(status_code=409, detail="Conversation is not awaiting approval")
 
-
-@app.post("/queries/approve/{approval_id}", response_model=QueryResponse)
-async def approve_query(approval_id: str) -> QueryResponse:
-    """Human approves a PENDING_APPROVAL query -> execute it."""
-    record = query_store.get_by_approval_id(approval_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Query not found")
-    if record.status != RequestStatus.PENDING_APPROVAL:
-        raise HTTPException(status_code=409, detail="Query is not pending approval")
-    _add_event(record.request_id, "human", "approved", "Human approved the query")
-    return await _execute_query(record.request_id, record.query)
-
-
-@app.post("/queries/reject/{approval_id}", response_model=QueryResponse)
-def reject_query(approval_id: str) -> QueryResponse:
-    """Human rejects a PENDING_APPROVAL query."""
-    record = query_store.get_by_approval_id(approval_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Query not found")
-    if record.status != RequestStatus.PENDING_APPROVAL:
-        raise HTTPException(status_code=409, detail="Query is not pending approval")
-    _add_event(record.request_id, "human", "rejected", "Human rejected the query")
-    rec = query_store.update_status(
-        record.request_id, RequestStatus.REJECTED, result="Rejected by user."
+    _add_event(conversation_id, "human", "approved", "Human approved the query")
+    conversation_store.update(
+        conversation_id,
+        status=ConversationStatus.ACTIVE,
+        approval_id=None,
+        review_verdict=None,
+        review_recommended_reject=False,
+        pending_query=None,
     )
-    return rec  # type: ignore[return-value]
+    return await _execute_message(conversation_id)
 
 
-@app.post("/query/{request_id}/reply", response_model=QueryResponse)
-async def reply_to_query(request_id: str, payload: QueryRequest) -> QueryResponse:
-    """Send a follow-up message to an existing completed query thread."""
-    record = query_store.get(request_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Query not found")
-    if record.status != RequestStatus.COMPLETED:
-        raise HTTPException(status_code=409, detail="Can only reply to completed queries")
-    if len(record.messages) >= MAX_THREAD_MESSAGES:
-        raise HTTPException(
-            status_code=409, detail="Conversation thread has reached the message limit"
-        )
-    return await _execute_reply(request_id, payload.query, record)
+@app.post("/conversations/{conversation_id}/reject", response_model=Conversation)
+def reject_conversation(conversation_id: str) -> Conversation:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.status != ConversationStatus.AWAITING_APPROVAL:
+        raise HTTPException(status_code=409, detail="Conversation is not awaiting approval")
+
+    _add_event(conversation_id, "human", "rejected", "Human rejected the query")
+    conversation_store.add_message(
+        conversation_id, Message(role="agent", content="Query rejected by user.")
+    )
+    conversation_store.update(
+        conversation_id,
+        status=ConversationStatus.ACTIVE,
+        approval_id=None,
+        review_verdict=None,
+        review_recommended_reject=False,
+        pending_query=None,
+    )
+    return conversation_store.get(conversation_id)  # type: ignore[return-value]
 
 
 @app.get("/", include_in_schema=False)
 def serve_frontend():
-    """Serve the frontend HTML."""
     index = _FRONTEND_DIR / "index.html"
     if index.is_file():
         return FileResponse(str(index), media_type="text/html")
@@ -454,7 +463,6 @@ async def global_exception_handler(request, exc):
 
 
 def serve():
-    """Start the Orchestrator Agent FastAPI server."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",

@@ -1,240 +1,304 @@
-"""Tests for the orchestrator query submission lifecycle."""
+# tests/test_orchestrator.py
+"""Tests for the orchestrator conversation lifecycle."""
 
 
-def test_submit_non_destructive_query(client):
-    """Non-destructive query should complete immediately."""
-    resp = client.post("/query", json={"query": "Show all tables"})
+# ── Conversation CRUD ──────────────────────────────────────────────────────
+
+
+def test_create_conversation(client):
+    """POST /conversations should create an empty conversation."""
+    resp = client.post("/conversations")
     assert resp.status_code == 201
     data = resp.json()
-    assert data["status"] == "COMPLETED"
-    assert data["request_id"]
-    assert data["result"]
-    assert data["query"] == "Show all tables"
-    assert len(data["events"]) >= 1
+    assert data["id"]
+    assert data["title"] == "New conversation"
+    assert data["status"] == "active"
+    assert data["messages"] == []
+    assert data["events"] == []
 
 
-def test_submit_destructive_query_is_rejected(client):
-    """Destructive query rejected by safety reviewer should be RECOMMENDED_REJECT."""
-    resp = client.post("/query", json={"query": "delete all employees"})
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["status"] == "RECOMMENDED_REJECT"
-    assert "review_verdict" in data
-
-
-def test_submit_destructive_query_pending_approval(client_approve):
-    """Destructive query approved by safety reviewer should be PENDING_APPROVAL."""
-    resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["status"] == "PENDING_APPROVAL"
-    assert "APPROVE" in data["review_verdict"]
-    assert data["approval_id"] is not None
-
-
-def test_submit_empty_query_returns_422(client):
-    resp = client.post("/query", json={"query": ""})
-    assert resp.status_code == 422
-
-
-# ── Query history endpoints ──────────────────────────────────────────────────
-
-
-def test_list_queries_empty(client):
-    resp = client.get("/queries")
+def test_list_conversations_empty(client):
+    resp = client.get("/conversations")
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-def test_list_queries_returns_submitted(client):
-    client.post("/query", json={"query": "Show all tables"})
-    resp = client.get("/queries")
-    assert resp.status_code == 200
+def test_list_conversations_returns_summaries(client):
+    """GET /conversations should return summaries without messages."""
+    client.post("/conversations")
+    resp = client.get("/conversations")
     data = resp.json()
     assert len(data) == 1
-    assert data[0]["query"] == "Show all tables"
+    assert data[0]["title"] == "New conversation"
+    assert "messages" not in data[0]
+    assert "events" not in data[0]
 
 
-def test_get_single_query(client):
-    post_resp = client.post("/query", json={"query": "Show all tables"})
-    request_id = post_resp.json()["request_id"]
-
-    resp = client.get(f"/queries/{request_id}")
+def test_get_conversation(client):
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client.get(f"/conversations/{conv_id}")
     assert resp.status_code == 200
-    assert resp.json()["request_id"] == request_id
+    assert resp.json()["id"] == conv_id
+    assert "messages" in resp.json()
 
 
-def test_get_query_not_found(client):
-    resp = client.get("/queries/nonexistent-id")
+def test_get_conversation_not_found(client):
+    resp = client.get("/conversations/nonexistent")
     assert resp.status_code == 404
 
 
-# ── Approval / rejection endpoints ──────────────────────────────────────────
+def test_delete_conversation(client):
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client.delete(f"/conversations/{conv_id}")
+    assert resp.status_code == 204
+    assert client.get(f"/conversations/{conv_id}").status_code == 404
 
 
-def test_approve_pending_query(client_approve):
-    """Approving a PENDING_APPROVAL query should execute it."""
-    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
-    data = post_resp.json()
-    assert data["status"] == "PENDING_APPROVAL"
-    approval_id = data["approval_id"]
-
-    resp = client_approve.post(f"/queries/approve/{approval_id}")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "COMPLETED"
-
-
-def test_reject_pending_query(client_approve):
-    """Rejecting a PENDING_APPROVAL query should mark it REJECTED."""
-    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
-    data = post_resp.json()
-    approval_id = data["approval_id"]
-
-    resp = client_approve.post(f"/queries/reject/{approval_id}")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "REJECTED"
-
-
-def test_approve_non_pending_returns_409(client_approve):
-    """Cannot approve a query that is not PENDING_APPROVAL once resolved."""
-    # First create a pending query, then reject it, then try to approve via approval_id
-    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
-    data = post_resp.json()
-    approval_id = data["approval_id"]
-
-    # Reject it first
-    client_approve.post(f"/queries/reject/{approval_id}")
-
-    # Now try to approve the already-rejected query
-    resp = client_approve.post(f"/queries/approve/{approval_id}")
-    assert resp.status_code == 409
-
-
-def test_approve_not_found(client):
-    resp = client.post("/queries/approve/nonexistent")
+def test_delete_conversation_not_found(client):
+    resp = client.delete("/conversations/nonexistent")
     assert resp.status_code == 404
 
 
-# ── Activity events ─────────────────────────────────────────────────────────
+# ── Message sending ────────────────────────────────────────────────────────
 
 
-def test_query_has_events(client):
-    """Completed query should have activity events."""
-    post_resp = client.post("/query", json={"query": "Show all tables"})
-    request_id = post_resp.json()["request_id"]
-
-    resp = client.get(f"/queries/{request_id}")
-    events = resp.json()["events"]
-    assert len(events) >= 2
-    assert events[0]["agent"] == "orchestrator"
-    assert events[0]["action"] == "received"
-
-
-# ── Readiness probe ─────────────────────────────────────────────────────────
-
-
-def test_readiness_probe(client):
-    """GET /ready should return 200 when agent can be initialised."""
-    resp = client.get("/ready")
+def test_send_message(client):
+    """Non-destructive message should get an agent response."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client.post(
+        f"/conversations/{conv_id}/messages", json={"content": "Show all tables"}
+    )
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
-
-
-# ── RECOMMENDED_REJECT override ─────────────────────────────────────────────
-
-
-def test_recommended_reject_has_events(client):
-    """RECOMMENDED_REJECT query should have review events."""
-    resp = client.post("/query", json={"query": "delete all employees"})
     data = resp.json()
-    assert data["status"] == "RECOMMENDED_REJECT"
-    events = data["events"]
-    actions = [e["action"] for e in events]
-    assert "review_started" in actions
-    assert "review_completed" in actions
-    assert "recommended_reject" in actions
-
-
-# ── SSE log stream ───────────────────────────────────────────────────────────
-
-
-def test_log_stream_endpoint_is_registered(client):
-    """The /logs/stream route should be registered in the app."""
-    routes = [r.path for r in client.app.routes if hasattr(r, "path")]
-    assert "/logs/stream" in routes
-
-
-# ── Conversation thread (reply) ──────────────────────────────────────────────
-
-
-def test_completed_query_has_messages(client):
-    """Completed query should have initial user + agent messages."""
-    resp = client.post("/query", json={"query": "Show all tables"})
-    data = resp.json()
-    assert data["status"] == "COMPLETED"
+    assert data["status"] == "active"
     assert len(data["messages"]) == 2
     assert data["messages"][0]["role"] == "user"
     assert data["messages"][0]["content"] == "Show all tables"
     assert data["messages"][1]["role"] == "agent"
 
 
-def test_reply_to_completed_query(client):
-    """Reply to a completed query should return updated messages."""
-    post_resp = client.post("/query", json={"query": "Show all tables"})
-    request_id = post_resp.json()["request_id"]
-
-    reply_resp = client.post(f"/query/{request_id}/reply", json={"query": "How many rows?"})
-    assert reply_resp.status_code == 200
-    data = reply_resp.json()
-    assert data["status"] == "COMPLETED"
-    assert len(data["messages"]) == 4  # original 2 + reply user + reply agent
-    assert data["messages"][2]["role"] == "user"
-    assert data["messages"][2]["content"] == "How many rows?"
-    assert data["messages"][3]["role"] == "agent"
+def test_send_message_updates_title(client):
+    """First message should set the conversation title."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "Show all tables in the database"},
+    )
+    resp = client.get(f"/conversations/{conv_id}")
+    assert resp.json()["title"] == "Show all tables in the database"
 
 
-def test_reply_to_pending_query_returns_409(client_approve):
-    """Cannot reply to a query that is not COMPLETED."""
-    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
-    request_id = post_resp.json()["request_id"]
-    assert post_resp.json()["status"] == "PENDING_APPROVAL"
+def test_send_message_title_truncated(client):
+    """Long first message should be truncated to 50 chars in title."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    long_msg = "A" * 80
+    client.post(f"/conversations/{conv_id}/messages", json={"content": long_msg})
+    resp = client.get(f"/conversations/{conv_id}")
+    title = resp.json()["title"]
+    assert len(title) == 53  # 50 chars + "..."
+    assert title.endswith("...")
 
-    resp = client_approve.post(f"/query/{request_id}/reply", json={"query": "Why?"})
-    assert resp.status_code == 409
 
-
-def test_reply_not_found(client):
-    """Reply to a nonexistent query should return 404."""
-    resp = client.post("/query/nonexistent-id/reply", json={"query": "hello"})
+def test_send_message_not_found(client):
+    resp = client.post(
+        "/conversations/nonexistent/messages", json={"content": "hello"}
+    )
     assert resp.status_code == 404
 
 
-def test_reply_builds_conversation(client):
-    """Multiple replies should accumulate messages."""
-    post_resp = client.post("/query", json={"query": "Show all tables"})
-    request_id = post_resp.json()["request_id"]
-
-    client.post(f"/query/{request_id}/reply", json={"query": "How many rows?"})
-    reply2 = client.post(f"/query/{request_id}/reply", json={"query": "Show first 5"})
-    data = reply2.json()
-    assert len(data["messages"]) == 6  # 2 initial + 2 per reply
+def test_send_empty_message_returns_422(client):
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client.post(f"/conversations/{conv_id}/messages", json={"content": ""})
+    assert resp.status_code == 422
 
 
-def test_reply_message_cap(client):
-    """Reply should be rejected once the message cap is reached."""
-    from agents.orchestrator_agent import MAX_THREAD_MESSAGES
-    from common.schemas import Message
-    from common.store import query_store
-
-    post_resp = client.post("/query", json={"query": "Show all tables"})
-    request_id = post_resp.json()["request_id"]
-    store = query_store
-    # Fill messages up to the cap
-    record = store.get(request_id)
-    while len(record.messages) < MAX_THREAD_MESSAGES:
-        store.add_message(request_id, Message(role="user", content="filler"))
-        record = store.get(request_id)
-
-    resp = client.post(f"/query/{request_id}/reply", json={"query": "one more"})
+def test_send_message_to_awaiting_returns_409(client_approve):
+    """Cannot send messages while conversation is awaiting approval."""
+    create_resp = client_approve.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client_approve.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "delete from users where id = 5"},
+    )
+    resp = client_approve.post(
+        f"/conversations/{conv_id}/messages", json={"content": "hello"}
+    )
     assert resp.status_code == 409
-    assert "message limit" in resp.json()["detail"]
+
+
+def test_multi_turn_conversation(client):
+    """Multiple messages should accumulate in the thread."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client.post(
+        f"/conversations/{conv_id}/messages", json={"content": "Show all tables"}
+    )
+    resp = client.post(
+        f"/conversations/{conv_id}/messages", json={"content": "How many rows?"}
+    )
+    data = resp.json()
+    assert len(data["messages"]) == 4  # 2 per turn
+
+
+def test_agent_context_isolation(client):
+    """Messages from conversation A must not leak into conversation B."""
+    # Conversation A
+    create_a = client.post("/conversations")
+    conv_a_id = create_a.json()["id"]
+    client.post(
+        f"/conversations/{conv_a_id}/messages", json={"content": "Show all tables"}
+    )
+
+    # Conversation B
+    create_b = client.post("/conversations")
+    conv_b_id = create_b.json()["id"]
+    resp = client.post(
+        f"/conversations/{conv_b_id}/messages", json={"content": "Count employees"}
+    )
+
+    # Conv B should only have its own messages
+    data = resp.json()
+    assert len(data["messages"]) == 2
+    assert data["messages"][0]["content"] == "Count employees"
+
+
+# ── Destructive queries & approval ─────────────────────────────────────────
+
+
+def test_destructive_message_recommended_reject(client):
+    """Safety reviewer rejection should set awaiting_approval + recommended_reject."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "delete all employees"},
+    )
+    data = resp.json()
+    assert data["status"] == "awaiting_approval"
+    assert data["review_recommended_reject"] is True
+    assert data["review_verdict"]
+    assert data["pending_query"] == "delete all employees"
+
+
+def test_destructive_message_pending_approval(client_approve):
+    """Safety reviewer approval should set awaiting_approval without recommended_reject."""
+    create_resp = client_approve.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client_approve.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "delete from users where id = 5"},
+    )
+    data = resp.json()
+    assert data["status"] == "awaiting_approval"
+    assert data["review_recommended_reject"] is False
+    assert "APPROVE" in data["review_verdict"]
+    assert data["approval_id"] is not None
+
+
+def test_approve_conversation(client_approve):
+    """Approving should execute the query and return to active."""
+    create_resp = client_approve.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client_approve.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "delete from users where id = 5"},
+    )
+    resp = client_approve.post(f"/conversations/{conv_id}/approve")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "active"
+    assert data["approval_id"] is None
+    assert data["pending_query"] is None
+    assert any(m["role"] == "agent" and m["content"] != "" for m in data["messages"])
+
+
+def test_reject_conversation(client_approve):
+    """Rejecting should add rejection message and return to active."""
+    create_resp = client_approve.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client_approve.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "delete from users where id = 5"},
+    )
+    resp = client_approve.post(f"/conversations/{conv_id}/reject")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "active"
+    assert data["approval_id"] is None
+    assert data["messages"][-1]["content"] == "Query rejected by user."
+
+
+def test_approve_not_awaiting_returns_409(client):
+    """Cannot approve a conversation that is not awaiting approval."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client.post(f"/conversations/{conv_id}/approve")
+    assert resp.status_code == 409
+
+
+def test_approve_not_found(client):
+    resp = client.post("/conversations/nonexistent/approve")
+    assert resp.status_code == 404
+
+
+def test_reject_not_found(client):
+    resp = client.post("/conversations/nonexistent/reject")
+    assert resp.status_code == 404
+
+
+# ── Activity events ────────────────────────────────────────────────────────
+
+
+def test_message_has_events(client):
+    """Processed message should have activity events."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client.post(
+        f"/conversations/{conv_id}/messages", json={"content": "Show all tables"}
+    )
+    resp = client.get(f"/conversations/{conv_id}")
+    events = resp.json()["events"]
+    assert len(events) >= 2
+    assert events[0]["agent"] == "orchestrator"
+    assert events[0]["action"] == "received"
+
+
+def test_destructive_message_has_review_events(client):
+    """Destructive message should have safety review events."""
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "delete all employees"},
+    )
+    resp = client.get(f"/conversations/{conv_id}")
+    events = resp.json()["events"]
+    actions = [e["action"] for e in events]
+    assert "review_started" in actions
+    assert "review_completed" in actions
+
+
+# ── Health & infrastructure ────────────────────────────────────────────────
+
+
+def test_health(client):
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_readiness_probe(client):
+    resp = client.get("/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_log_stream_endpoint_is_registered(client):
+    routes = [r.path for r in client.app.routes if hasattr(r, "path")]
+    assert "/logs/stream" in routes
