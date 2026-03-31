@@ -48,12 +48,16 @@ def create_mcp_client(mcp_url: str, auth: dict | None = None) -> MCPClient:
         token = os.environ[auth["env_var"]]
         headers["Authorization"] = f"Bearer {token}"
 
-    http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(300.0, connect=30.0, read=120.0),
-        headers=headers,
-    )
+    # httpx.AsyncClient must be created inside the lambda so it's instantiated
+    # in the MCPClient background thread's event loop, not the main thread's.
     return MCPClient(
-        lambda: streamable_http_client(mcp_url, http_client=http_client),
+        lambda: streamable_http_client(
+            mcp_url,
+            http_client=httpx.AsyncClient(
+                timeout=httpx.Timeout(300.0, connect=30.0, read=120.0),
+                headers=headers,
+            ),
+        ),
     )
 
 
