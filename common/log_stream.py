@@ -8,6 +8,7 @@ Broadcasts structured log records to connected SSE clients.  Install the
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -22,10 +23,8 @@ class SseBroadcaster:
 
     def publish(self, data: str) -> None:
         for q in list(self._queues):
-            try:
+            with contextlib.suppress(asyncio.QueueFull):
                 q.put_nowait(data)
-            except asyncio.QueueFull:
-                pass  # drop oldest if consumer can't keep up
 
     @asynccontextmanager
     async def subscribe(self) -> AsyncGenerator[asyncio.Queue[str]]:
@@ -46,12 +45,16 @@ class SseHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            payload = json.dumps({
-                "timestamp": self.format(record).split(" ")[0] if " " in self.format(record) else "",
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-            })
+            formatted = self.format(record)
+            timestamp = formatted.split(" ")[0] if " " in formatted else ""
+            payload = json.dumps(
+                {
+                    "timestamp": timestamp,
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "message": record.getMessage(),
+                }
+            )
             self._broadcaster.publish(payload)
         except Exception:
             self.handleError(record)

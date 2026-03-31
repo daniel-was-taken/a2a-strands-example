@@ -1,6 +1,6 @@
 """Request/response schemas for the orchestrator API."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -18,9 +18,7 @@ class RequestStatus(StrEnum):
 class ActivityEvent(BaseModel):
     """Single event in the activity log for a query."""
 
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     agent: str
     action: str
     detail: str = ""
@@ -31,9 +29,7 @@ class Message(BaseModel):
 
     role: Literal["user", "agent"]
     content: str
-    timestamp: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class QueryRequest(BaseModel):
@@ -49,9 +45,7 @@ class QueryResponse(BaseModel):
     review_verdict: str | None = None
     messages: list[Message] = Field(default_factory=list)
     events: list[ActivityEvent] = Field(default_factory=list)
-    created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 class ErrorResponse(BaseModel):

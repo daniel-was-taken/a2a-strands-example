@@ -8,11 +8,11 @@ Firestore, etc.) without changing calling code.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from typing import Protocol
 
-from schemas import ActivityEvent, Message, QueryResponse, RequestStatus
+from .config import settings
+from .schemas import ActivityEvent, Message, QueryResponse, RequestStatus
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +100,8 @@ class InMemoryStore:
             return None
 
 
-# Singleton used by the application.
 def _create_store() -> QueryStore:
-    backend = os.environ.get("STORE_BACKEND", "memory")
-    if backend == "postgres":
+    if settings.store_backend == "postgres":
         from db.repository import PostgresStore
 
         logger.info("Using PostgresStore (DATABASE_URL)")
