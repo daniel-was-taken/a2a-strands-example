@@ -61,8 +61,7 @@ def _clear_store():
     """Reset the in-memory store between tests."""
     from common.store import conversation_store
 
-    if hasattr(conversation_store, "_conversations"):
-        conversation_store._conversations.clear()
+    conversation_store._conversations.clear()
 
 
 @pytest.fixture(autouse=True)
