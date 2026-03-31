@@ -11,10 +11,10 @@ from google import genai
 from strands import Agent
 from strands.models.gemini import GeminiModel
 from strands.multiagent import GraphBuilder
+from strands.multiagent.graph import Graph
 from strands.types.tools import ToolSpec
 
 from agents.model import create_model
-from common.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ def _create_no_tools_model() -> NoToolsGeminiModel:
     )
 
 
-def create_graph_agent():
+def create_graph_agent() -> Graph:
     """Build a graph-based agent with analyze -> implement -> review workflow."""
     model = _create_no_tools_model()
 
@@ -97,24 +97,18 @@ def create_graph_agent():
     )
     builder.set_entry_point("analyze")
     builder.set_max_node_executions(5)
-    graph = builder.build()
-    graph.name = "Graph Agent"
-    graph.description = (
-        "Handles multi-step reasoning workflows with analyze, implement, and review stages"
-    )
-    return graph
+    return builder.build()
 
 
-def serve():
+def serve() -> None:
     """Start the Graph Agent as an A2A server."""
     from common.server import serve_agent
 
     agent = create_graph_agent()
     serve_agent(
         agent,
-        name="graph-agent",
-        port=settings.graph_agent_port,
-        http_url=settings.graph_agent_http_url,
+        name="Graph Agent",
+        port=8002,
         skills=_GRAPH_SKILLS,
     )
 
