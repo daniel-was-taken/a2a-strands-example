@@ -3,7 +3,7 @@
 A production-ready [Agent-to-Agent (A2A)](https://github.com/google/a2a-spec) multi-agent system built with the [Strands Agents SDK](https://github.com/strands-agents/sdk-python). An orchestrator routes user queries to specialist agents over HTTP using the A2A protocol.
 
 **LLM:** Google Gemini (configurable via `GEMINI_MODEL_ID`)
-**Database:** Neon PostgreSQL via MCP (Model Context Protocol)
+**MCP:** Any MCP server (configured per-agent in `agents.yaml`)
 **Framework:** FastAPI + Strands A2A SDK
 
 ## Architecture
@@ -11,19 +11,19 @@ A production-ready [Agent-to-Agent (A2A)](https://github.com/google/a2a-spec) mu
 ```
 User -> Orchestrator (FastAPI :8000)
             |
-            +-- A2A --> Database Agent (:8001) --> Neon MCP --> PostgreSQL
-            |
-            +-- A2A --> Graph Agent (:8002)        (analyze -> implement -> review)
+            +-- A2A --> [Agents declared in agents.yaml]
+                        ├── MCP Agent (config-driven, any MCP server)
+                        └── Custom Agent (Python factory, e.g. Graph Agent)
 ```
 
-The orchestrator discovers remote agents via `A2AClientToolProvider` and routes queries based on intent. Each specialist agent runs as an independent A2A server that can be deployed, scaled, and replaced independently.
+Agents are declared in `agents.yaml` and spun up dynamically — no Python code changes needed to add a new MCP-backed agent. The orchestrator discovers agents via `A2AClientToolProvider` and routes queries based on intent. Each specialist agent runs as an independent A2A server.
 
 ### Two Operating Modes
 
 | Mode | Command | Description |
 |------|---------|-------------|
-| **A2A** (default) | `python run_system.py` | Three processes: orchestrator + two A2A agents |
-| **Direct** | `DATABASE_MODE=direct python run_system.py` | Single process, DB tools loaded in-process |
+| **A2A** (default) | `python run_system.py` | Orchestrator + agents from agents.yaml |
+| **Direct** | `DATABASE_MODE=direct python run_system.py` | Single process, first MCP agent in-process |
 
 ### Key Features
 
@@ -56,12 +56,9 @@ Required variables:
 | Variable | Description |
 |----------|-------------|
 | `GOOGLE_API_KEY` | Google AI Studio API key (for Gemini) |
-| `NEON_API_KEY` | Neon API key |
-| `NEON_PROJECT_ID` | Neon project ID |
-| `NEON_DATABASE` | Neon database name |
-| `NEON_BRANCH_ID` | Neon branch ID |
+| `AGENTS_CONFIG` | Path to agents YAML config (default: `agents.yaml`) |
 
-See `.env.example` for the full list of optional settings.
+MCP server credentials (API keys, etc.) are referenced by `agents.yaml` auth blocks and should be set as env vars. See `.env.example` for the full list of optional settings.
 
 ### 3. Run
 
@@ -176,10 +173,11 @@ a2a-strands-example/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
+├── agents.yaml                      # Agent definitions (MCP and custom types)
 ├── agents/
 │   ├── model.py                      # Shared Gemini model factory
 │   ├── orchestrator_agent.py         # Orchestrator (FastAPI, routes to agents)
-│   ├── db_agent.py                   # Database Agent (Neon MCP tools)
+│   ├── mcp_agent.py                  # Generic MCP agent factory + CLI
 │   └── graph_agent.py               # Graph Agent (analyze -> implement -> review)
 ├── common/
 │   ├── config.py                     # Pydantic Settings (all env vars)
@@ -192,13 +190,9 @@ a2a-strands-example/
 │   ├── task_store.py                 # In-memory A2A TaskStore
 │   └── tracing.py                    # OpenTelemetry setup
 ├── tools/
-│   ├── assistant_factory.py          # Factory for MCP-backed specialist tools
-│   ├── schema_assistant.py           # Read-only schema/SELECT tool
-│   ├── insert_assistant.py           # INSERT tool
-│   ├── delete_assistant.py           # DELETE tool
 │   └── safety_reviewer.py           # LLM-based safety reviewer
 ├── mcp_client/
-│   └── neon_mcp.py                   # Neon MCP singleton client
+│   └── client.py                     # Generic MCP client factory + registry
 ├── db/
 │   └── repository.py                 # PostgreSQL QueryStore implementation
 ├── frontend/
