@@ -49,6 +49,7 @@ def serve_agent(
         version=version,
         skills=skills or [],
         task_store=InMemoryA2ATaskStore(),
+        enable_a2a_compliant_streaming=True,
     )
 
     app = a2a_server.to_fastapi_app()
