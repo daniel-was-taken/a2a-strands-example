@@ -7,7 +7,10 @@ Usage::
 
     from mcp_client.client import get_mcp_client, shutdown_all
 
-    client = get_mcp_client("https://mcp.neon.tech/mcp", auth={"type": "bearer", "env_var": "NEON_API_KEY"})
+    client = get_mcp_client(
+        "https://mcp.neon.tech/mcp",
+        auth={"type": "bearer", "env_var": "NEON_API_KEY"},
+    )
     # ... use client with Strands Agent ...
     shutdown_all()  # at process exit
 """

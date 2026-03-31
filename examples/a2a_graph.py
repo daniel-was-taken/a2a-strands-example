@@ -11,12 +11,12 @@ builder.add_node(implementer, "implement")
 builder.add_node(reviewer, "review")
 builder.add_edge("analyze", "implement")
 builder.add_edge("implement", "review")
-    # Conditional routing
+# Conditional routing
 builder.add_edge(
-        "review",
-        "implement",
-        condition=lambda state: "needs revision" in str(state.results.get("review", ""))
-    )
+    "review",
+    "implement",
+    condition=lambda state: "needs revision" in str(state.results.get("review", "")),
+)
 builder.set_entry_point("analyze")
 builder.set_max_node_executions(10)
 graph = builder.build()

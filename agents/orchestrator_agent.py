@@ -60,10 +60,7 @@ def _build_agent_urls(agents_config: list[dict]) -> list[str]:
 
 def _build_agent_names(agents_config: list[dict]) -> dict[str, str]:
     """Build URL -> display name mapping from config."""
-    return {
-        f"http://localhost:{cfg['port']}/": cfg["name"]
-        for cfg in agents_config
-    }
+    return {f"http://localhost:{cfg['port']}/": cfg["name"] for cfg in agents_config}
 
 
 def _build_system_prompt(agents_config: list[dict]) -> str:
@@ -88,6 +85,7 @@ values listed above. Do NOT invent or guess URLs.
 When asked what agents are available, list all connected agents and their capabilities.
 Keep responses clear and relay the results back accurately.
 """
+
 
 # ── Lazy-loaded agent singleton ──────────────────────────────────────
 

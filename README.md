@@ -1,105 +1,75 @@
-# A2A Database Orchestrator
+# A2A Multi-Agent System
 
-Agent-to-Agent (A2A) communication example using the [Strands SDK](https://github.com/strands-agents/sdk-python), implementing a database orchestrator that performs CRUD operations via [Neon MCP](https://neon.tech/).
+A production-ready [Agent-to-Agent (A2A)](https://github.com/google/a2a-spec) multi-agent system built with the [Strands Agents SDK](https://github.com/strands-agents/sdk-python). An orchestrator routes user queries to specialist agents over HTTP using the A2A protocol.
+
+**LLM:** Google Gemini (configurable via `GEMINI_MODEL_ID`)
+**Database:** Neon PostgreSQL via MCP (Model Context Protocol)
+**Framework:** FastAPI + Strands A2A SDK
 
 ## Architecture
 
-By default the orchestrator runs as a **single service** (direct mode) where the database agent tools are loaded in-process. Set `DATABASE_MODE=a2a` to use the original two-service A2A topology.
-
-### Direct mode (default)
-
 ```
-+---------------------+         +-----------+
-| Orchestrator        |  MCP    | Neon MCP  |
-| (FastAPI :8000)     | <-----> | (Remote)  |
-+---------------------+         +-----------+
-        ^
-        |
-   User Requests (REST API + SSE)
+User -> Orchestrator (FastAPI :8000)
+            |
+            +-- A2A --> Database Agent (:8001) --> Neon MCP --> PostgreSQL
+            |
+            +-- A2A --> Graph Agent (:8002)        (analyze -> implement -> review)
 ```
 
-### A2A mode (`DATABASE_MODE=a2a`)
+The orchestrator discovers remote agents via `A2AClientToolProvider` and routes queries based on intent. Each specialist agent runs as an independent A2A server that can be deployed, scaled, and replaced independently.
 
-```
-+---------------------+         +---------------------+         +-----------+
-| Orchestrator Agent  |  A2A    |   Database Agent     |  MCP    | Neon MCP  |
-| (FastAPI :8000)     | <-----> | (A2A Server :8001)   | <-----> | (Remote)  |
-+---------------------+         +---------------------+         +-----------+
-```
+### Two Operating Modes
 
-### Key features
+| Mode | Command | Description |
+|------|---------|-------------|
+| **A2A** (default) | `python run_system.py` | Three processes: orchestrator + two A2A agents |
+| **Direct** | `DATABASE_MODE=direct python run_system.py` | Single process, DB tools loaded in-process |
 
-- **Safety review** — destructive queries (DELETE, DROP, etc.) are evaluated by an LLM safety reviewer. Rejected queries receive `RECOMMENDED_REJECT` status; approved queries are parked as `PENDING_APPROVAL` for human confirmation.
-- **Approval flow** — each pending query gets a short `approval_id` for approve/reject actions.
-- **SSE log streaming** — real-time agent logs via `GET /logs/stream`.
-- **API key auth** — optional `x-api-key` header enforcement (set `API_KEY` env var).
-- **Rate limiting** — configurable via `RATE_LIMIT` (slowapi).
-- **Swappable persistence** — in-memory (default) or PostgreSQL (`STORE_BACKEND=postgres`).
-- **Lifecycle hooks** — Strands `HookProvider` for before/after invocation logging.
-- **Cloud Run + Terraform** — deploy via `./deploy.sh`, tear down via `./destroy.sh`.
+### Key Features
 
-## Setup
+- **Safety review** -- Destructive queries (DELETE, DROP, TRUNCATE) are evaluated by an LLM reviewer. Rejected queries get `RECOMMENDED_REJECT` status; approved ones are parked as `PENDING_APPROVAL` for human confirmation.
+- **Conversation threads** -- Follow-up replies within a query thread (`POST /query/{id}/reply`).
+- **SSE log streaming** -- Real-time agent logs via `GET /logs/stream`.
+- **Auth** -- Optional `X-API-Key` header on the orchestrator, optional `X-Agent-API-Key` for inter-agent calls.
+- **Rate limiting** -- Configurable via `RATE_LIMIT` (default: `30/minute`).
+- **Swappable persistence** -- In-memory (default) or PostgreSQL (`STORE_BACKEND=postgres`).
+- **OpenTelemetry tracing** -- Set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable.
 
-### 1. Create and activate a virtual environment
+## Quick Start
+
+### 1. Create a virtual environment and install
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -e ".[dev]"
 ```
 
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configure environment variables
+### 2. Configure environment
 
 ```bash
 cp .env.example .env
 ```
 
-Set these values in `.env`:
+Required variables:
 
 | Variable | Description |
-|---|---|
+|----------|-------------|
+| `GOOGLE_API_KEY` | Google AI Studio API key (for Gemini) |
 | `NEON_API_KEY` | Neon API key |
 | `NEON_PROJECT_ID` | Neon project ID |
 | `NEON_DATABASE` | Neon database name |
 | `NEON_BRANCH_ID` | Neon branch ID |
-| `GOOGLE_API_KEY` | Google AI Studio API key (for Gemini model) |
-| `DATABASE_MODE` | `direct` (default) or `a2a` |
-| `API_KEY` | Optional API key for authentication |
-| `STORE_BACKEND` | `memory` (default) or `postgres` |
-| `DATABASE_URL` | PostgreSQL connection string (when `STORE_BACKEND=postgres`) |
 
-## Run
+See `.env.example` for the full list of optional settings.
 
-### Start the system (direct mode — default)
+### 3. Run
 
 ```bash
 python run_system.py
 ```
 
-### Start in A2A mode
-
-```bash
-DATABASE_MODE=a2a python run_system.py
-```
-
-### Start the orchestrator only
-
-```bash
-python -m agents.orchestrator_agent
-```
-
-### Docker Compose
-
-```bash
-docker compose up --build
-```
-
-### Make requests
+### 4. Make requests
 
 ```bash
 # Read-only query
@@ -112,41 +82,88 @@ curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
   -d '{"query": "Insert a new employee named Jane Doe with email jane@example.com"}'
 
-# Delete (triggers safety review)
+# Delete (triggers safety review + approval flow)
 curl -X POST http://localhost:8000/query \
   -H "Content-Type: application/json" \
   -d '{"query": "Delete the employee with id 5"}'
 
-# Approve a pending query (use approval_id from response)
+# Approve a pending query
 curl -X POST http://localhost:8000/queries/approve/<approval_id>
 
-# Health / readiness
+# Follow-up reply
+curl -X POST http://localhost:8000/query/<request_id>/reply \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How many rows were affected?"}'
+
+# Health check
 curl http://localhost:8000/health
-curl http://localhost:8000/ready
-
-# SSE log stream
-curl -N http://localhost:8000/logs/stream
 ```
 
-## Tests
+## Adding a New Agent
 
-All tests use mocked agents -- no real database or LLM calls.
+The project is designed so that anyone can add a new A2A agent with minimal boilerplate. The `serve_agent()` helper in `common/server.py` handles all the server infrastructure (logging, tracing, A2A protocol, auth middleware, CORS).
 
-```bash
-pytest tests/ -v
+### Minimal example
+
+```python
+# agents/my_agent.py
+from strands import Agent
+from strands.tools.mcp import MCPClient
+from mcp.client.streamable_http import streamable_http_client
+
+from agents.model import create_model
+from common.server import serve_agent
+
+
+def create_my_agent() -> Agent:
+    """Create an agent that wraps your MCP server."""
+    mcp_client = MCPClient(
+        lambda: streamable_http_client("http://localhost:9000/mcp")
+    )
+    return Agent(
+        model=create_model(),
+        name="My Agent",
+        description="Handles requests for my service",
+        system_prompt="You are a specialist agent for ...",
+        tools=[mcp_client],
+        callback_handler=None,
+    )
+
+
+def serve():
+    agent = create_my_agent()
+    serve_agent(agent, name="my-agent", port=8003)
+
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
+    serve()
 ```
+
+### Register with the orchestrator
+
+1. Add the URL to `common/config.py`:
+   ```python
+   my_agent_url: str = "http://localhost:8003/"
+   ```
+
+2. Add the URL to the orchestrator's `known_agent_urls` list and system prompt in `agents/orchestrator_agent.py`.
+
+3. Add a process entry in `run_system.py` (for local dev) and a service in `docker-compose.yml` (for Docker).
 
 ## API Endpoints
 
 | Method | Path | Description |
-|---|---|---|
+|--------|------|-------------|
 | `GET` | `/health` | Liveness check |
-| `GET` | `/ready` | Readiness probe (verifies agent can start) |
-| `POST` | `/query` | Submit a database query |
+| `GET` | `/ready` | Readiness probe (verifies agent initialization) |
+| `POST` | `/query` | Submit a query |
 | `GET` | `/queries` | List all queries (newest first) |
 | `GET` | `/queries/{request_id}` | Get a single query |
-| `POST` | `/queries/approve/{approval_id}` | Approve a pending query |
-| `POST` | `/queries/reject/{approval_id}` | Reject a pending query |
+| `POST` | `/queries/approve/{approval_id}` | Approve a pending destructive query |
+| `POST` | `/queries/reject/{approval_id}` | Reject a pending destructive query |
+| `POST` | `/query/{request_id}/reply` | Send a follow-up message |
 | `GET` | `/logs/stream` | SSE log stream |
 | `GET` | `/` | Frontend UI |
 
@@ -154,70 +171,115 @@ pytest tests/ -v
 
 ```
 a2a-strands-example/
-├── run_system.py                  # System runner (direct or A2A mode)
-├── schemas.py                     # Pydantic request/response models
-├── store.py                       # QueryStore protocol + InMemoryStore
-├── log_stream.py                  # SSE broadcaster + logging handler
-├── hooks.py                       # Strands lifecycle hooks
-├── requirements.txt               # Dev dependencies (includes prod)
-├── requirements-prod.txt          # Production dependencies
-├── Dockerfile                     # Container image
-├── docker-compose.yml             # Local multi-service setup
-├── deploy.sh                      # Cloud Run deploy script
-├── destroy.sh                     # Cloud Run teardown script
-├── .env.example                   # Environment variable template
+├── run_system.py                     # System runner (A2A or direct mode)
+├── pyproject.toml                    # Build config, dependencies, tool settings
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
 ├── agents/
-│   ├── model.py                   # Shared Gemini model configuration
-│   ├── db_agent.py                # Database Agent (direct tools + A2A server)
-│   └── orchestrator_agent.py      # Orchestrator Agent (FastAPI)
-├── db/
-│   └── repository.py              # PostgreSQL QueryStore implementation
-├── mcp_client/
-│   └── neon_mcp.py                # Neon MCP client factory
+│   ├── model.py                      # Shared Gemini model factory
+│   ├── orchestrator_agent.py         # Orchestrator (FastAPI, routes to agents)
+│   ├── db_agent.py                   # Database Agent (Neon MCP tools)
+│   └── graph_agent.py               # Graph Agent (analyze -> implement -> review)
+├── common/
+│   ├── config.py                     # Pydantic Settings (all env vars)
+│   ├── server.py                     # serve_agent() helper for A2A servers
+│   ├── schemas.py                    # Pydantic request/response models
+│   ├── store.py                      # QueryStore protocol + InMemoryStore
+│   ├── auth.py                       # X-Agent-API-Key middleware
+│   ├── log_stream.py                 # SSE broadcaster
+│   ├── logging_setup.py              # Structured JSON logging
+│   ├── task_store.py                 # In-memory A2A TaskStore
+│   └── tracing.py                    # OpenTelemetry setup
 ├── tools/
-│   ├── assistant_factory.py       # Shared factory for specialist tools
-│   ├── schema_assistant.py        # Read-only schema tool
-│   ├── insert_assistant.py        # Insert tool
-│   ├── delete_assistant.py        # Delete tool
-│   └── safety_reviewer.py         # Safety reviewer agent
-├── infra/                         # Terraform (Cloud Run + Artifact Registry)
+│   ├── assistant_factory.py          # Factory for MCP-backed specialist tools
+│   ├── schema_assistant.py           # Read-only schema/SELECT tool
+│   ├── insert_assistant.py           # INSERT tool
+│   ├── delete_assistant.py           # DELETE tool
+│   └── safety_reviewer.py           # LLM-based safety reviewer
+├── mcp_client/
+│   └── neon_mcp.py                   # Neon MCP singleton client
+├── db/
+│   └── repository.py                 # PostgreSQL QueryStore implementation
+├── frontend/
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── infra/                            # Terraform (Cloud Run + Artifact Registry)
 │   ├── main.tf
 │   ├── variables.tf
 │   ├── outputs.tf
-│   ├── terraform.tfvars.example
-│   └── modules/
-│       ├── artifact-registry/
-│       └── cloudrun-runtime/
-├── frontend/
-│   ├── index.html                 # Frontend UI
-│   ├── style.css                  # Styles (includes SSE log panel)
-│   └── app.js                     # Vanilla JS client
+│   └── terraform.tfvars.example
 └── tests/
-    ├── conftest.py                # Test fixtures (fully mocked)
-    ├── test_smoke.py              # Health check tests
-    ├── test_orchestrator.py       # Query lifecycle tests
-    └── test_store.py              # InMemoryStore unit tests
+    ├── conftest.py                   # Shared fixtures (fully mocked)
+    ├── test_smoke.py
+    ├── test_orchestrator.py          # Query lifecycle tests
+    ├── test_store.py                 # InMemoryStore tests
+    ├── unit/
+    │   └── test_common.py            # Auth, task store, logging tests
+    ├── integration/
+    │   ├── test_a2a_server.py        # A2A protocol tests
+    │   └── test_agent_card.py        # AgentCard contract tests
+    └── e2e/
+        └── test_e2e_stub.py          # E2E stubs (requires running system)
+```
+
+## Testing
+
+All tests use mocked agents -- no real API keys or database connections needed.
+
+```bash
+# Run all tests
+pytest
+
+# Run a specific file
+pytest tests/test_orchestrator.py -v
+
+# Run a single test
+pytest tests/test_orchestrator.py::test_submit_non_destructive_query
+
+# Stop on first failure
+pytest -x
+```
+
+## Code Quality
+
+```bash
+# Lint
+ruff check .
+
+# Auto-fix lint issues
+ruff check --fix .
+
+# Format
+ruff format .
+
+# Type checking
+mypy agents/ tools/ mcp_client/ common/ db/
+```
+
+## Docker
+
+```bash
+# Build and run all services
+docker compose up --build
+
+# Run a single agent
+docker compose up db-agent
 ```
 
 ## Deployment
 
 ### Cloud Run + Terraform
 
-1. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` and fill in your GCP project config
-2. Create secrets in GCP Secret Manager for each entry in the `secrets` map
-3. Run `./deploy.sh`
-
-To tear down: `./destroy.sh`
-
-## Extending
-
-### Future improvements documented in the plan:
-
-- **AgentCore deployment** — Use `BedrockAgentCoreApp` from the [AWS Strands Course](https://github.com/aws-samples/sample-getting-started-with-strands-agents-course/tree/main/course-4) for managed agent hosting
-- **Session management** — Add `FileSessionManager` or `SummarizingConversationManager` from Strands for multi-turn conversations
-- **Observability** — Integrate LangFuse + RAGAS for evaluation and monitoring (Course 1 Lab 6 pattern)
+1. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` and fill in your GCP project config.
+2. Create secrets in GCP Secret Manager for the required environment variables.
+3. Run `./deploy.sh`.
+4. To tear down: `./destroy.sh`.
 
 ## References
 
-- [Strands A2A Inter-Agent Lab](https://github.com/aws-samples/sample-getting-started-with-strands-agents-course/tree/main/course-1/Lab5/strands-a2a-inter-agent) -- A2A communication patterns
-- [strands-pos](https://github.com/daniel-was-taken/strands-pos) -- Database orchestration with Neon MCP
+- [Strands Agents SDK](https://github.com/strands-agents/sdk-python)
+- [Strands A2A Documentation](https://strandsagents.com/latest/user-guide/concepts/multi-agent/a2a/)
+- [A2A Protocol Specification](https://github.com/google/a2a-spec)
+- [Neon MCP](https://neon.tech/docs/get-started-with-neon/mcp)

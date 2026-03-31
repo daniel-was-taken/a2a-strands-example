@@ -106,13 +106,22 @@ def main():
 
     for cfg in agents_config:
         if cfg["type"] == "mcp":
-            cmd = [python, "-m", "agents.mcp_agent",
-                   "--config", config_path, "--agent", cfg["name"]]
+            cmd = [
+                python,
+                "-m",
+                "agents.mcp_agent",
+                "--config",
+                config_path,
+                "--agent",
+                cfg["name"],
+            ]
         elif cfg["type"] == "custom":
             cmd = [python, "-m", cfg["module"]]
         else:
-            print(f"  WARNING: Unknown agent type '{cfg['type']}' for {cfg['name']}, skipping.",
-                  file=sys.stderr)
+            print(
+                f"  WARNING: Unknown agent type '{cfg['type']}' for {cfg['name']}, skipping.",
+                file=sys.stderr,
+            )
             continue
 
         agent_procs.append(subprocess.Popen(cmd))
