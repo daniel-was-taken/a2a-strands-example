@@ -48,19 +48,20 @@ def create_mcp_client(mcp_url: str, auth: dict | None = None) -> MCPClient:
         token = os.environ[auth["env_var"]]
         headers["Authorization"] = f"Bearer {token}"
 
+    http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(300.0, connect=30.0, read=120.0),
+        headers=headers,
+    )
     return MCPClient(
-        lambda: streamable_http_client(
-            mcp_url,
-            http_client=httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0, connect=30.0, read=120.0),
-                headers=headers,
-            ),
-        ),
+        lambda: streamable_http_client(mcp_url, http_client=http_client),
     )
 
 
 def _is_healthy(client: MCPClient) -> bool:
-    """Return True if the client's background thread is still running."""
+    """Return True if the client's background thread is still running.
+
+    Note: accesses private ``_background_thread`` attr (strands-agents ~0.1.x).
+    """
     thread = client._background_thread
     return thread is not None and thread.is_alive()
 

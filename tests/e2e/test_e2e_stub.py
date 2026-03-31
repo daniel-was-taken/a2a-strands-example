@@ -1,12 +1,10 @@
 """End-to-end tests — orchestrator → specialist agent round-trip.
 
-These tests require live infrastructure (Neon DB, Gemini API key) and are
+These tests require live infrastructure (MCP server, Gemini API key) and are
 skipped by default unless the E2E_TESTS environment variable is set.
 
 Usage:
-    E2E_TESTS=1 DATABASE_AGENT_URL=http://localhost:8001/ \\
-        GRAPH_AGENT_URL=http://localhost:8002/ \\
-        pytest tests/e2e/ -v
+    E2E_TESTS=1 pytest tests/e2e/ -v
 
 Pre-requisites:
     1. Start all services:  python run_system.py
@@ -39,10 +37,10 @@ async def test_orchestrator_health():
 
 @pytest.mark.asyncio
 async def test_db_agent_card_reachable():
-    """Database Agent AgentCard should be reachable from orchestrator."""
+    """Database Reader AgentCard should be reachable."""
     import httpx
 
-    db_agent_url = os.environ.get("DATABASE_AGENT_URL", "http://localhost:8001/")
+    db_agent_url = os.environ.get("DB_READER_URL", "http://localhost:8001/")
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{db_agent_url.rstrip('/')}/.well-known/agent-card.json",
@@ -50,7 +48,7 @@ async def test_db_agent_card_reachable():
         )
     assert resp.status_code == 200
     card = resp.json()
-    assert card["name"] == "Database Agent"
+    assert card["name"] == "Database Reader"
 
 
 @pytest.mark.asyncio

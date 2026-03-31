@@ -1,7 +1,8 @@
 """Orchestrator Agent -- FastAPI app on port 8000.
 
-Receives user requests via REST and forwards them to the Database Agent
-using the A2A protocol. Includes a safety review step for destructive queries.
+Receives user requests via REST and routes them to specialist agents
+(declared in agents.yaml) via the A2A protocol.  Includes a safety
+review step for destructive queries.
 """
 
 import asyncio
@@ -13,7 +14,6 @@ from secrets import token_hex
 from uuid import uuid4
 
 import uvicorn
-import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -49,25 +49,36 @@ MAX_THREAD_MESSAGES = 20
 
 def _load_agents_config() -> list[dict]:
     """Load agents list from the YAML config file."""
-    with open(settings.agents_config) as f:
-        return yaml.safe_load(f)["agents"]
+    from agents.mcp_agent import load_agents_config
+
+    return load_agents_config(settings.agents_config)
+
+
+def _agent_url(cfg: dict) -> str:
+    """Derive the A2A URL for an agent from its config.
+
+    Uses ``host`` from config when set, otherwise ``localhost``.  In Docker
+    Compose, set ``host`` per agent to the service name (e.g. ``db-reader``).
+    """
+    host = cfg.get("host", "localhost")
+    return f"http://{host}:{cfg['port']}/"
 
 
 def _build_agent_urls(agents_config: list[dict]) -> list[str]:
     """Build the list of agent URLs from config."""
-    return [f"http://localhost:{cfg['port']}/" for cfg in agents_config]
+    return [_agent_url(cfg) for cfg in agents_config]
 
 
 def _build_agent_names(agents_config: list[dict]) -> dict[str, str]:
     """Build URL -> display name mapping from config."""
-    return {f"http://localhost:{cfg['port']}/": cfg["name"] for cfg in agents_config}
+    return {_agent_url(cfg): cfg["name"] for cfg in agents_config}
 
 
 def _build_system_prompt(agents_config: list[dict]) -> str:
     """Build the orchestrator system prompt dynamically from agents config."""
     agent_lines = []
     for cfg in agents_config:
-        url = f"http://localhost:{cfg['port']}/"
+        url = _agent_url(cfg)
         desc = cfg.get("description", cfg["name"])
         agent_lines.append(f'- **{cfg["name"]}** (target_agent_url: "{url}")\n  {desc}')
 
@@ -137,7 +148,7 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_lim
 
 app = FastAPI(
     title="A2A Database Orchestrator",
-    description="Orchestrator agent that communicates with a Database Agent via A2A protocol",
+    description="Orchestrator agent that routes queries to specialist agents via A2A protocol",
     lifespan=lifespan,
     responses={
         404: {"model": ErrorResponse},
@@ -316,7 +327,7 @@ async def log_stream():
 
 @app.post("/query", response_model=QueryResponse, status_code=201)
 async def submit_query(payload: QueryRequest) -> QueryResponse:
-    """Accept a user query, optionally run safety review, and forward to the Database Agent."""
+    """Accept a user query, optionally run safety review, and route to a specialist agent."""
     request_id = str(uuid4())
     query = payload.query
 

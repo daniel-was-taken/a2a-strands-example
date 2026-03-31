@@ -9,7 +9,7 @@ services:
       DATABASE_MODE: "a2a"
       AGENTS_CONFIG: "/app/agents.yaml"
     volumes:
-      - ./agents.yaml:/app/agents.yaml:ro
+      - ./agents-docker.yaml:/app/agents.yaml:ro
     depends_on:
       - db-reader
       - db-writer
@@ -30,7 +30,7 @@ services:
     ports:
       - "8001:8001"
     volumes:
-      - ./agents.yaml:/app/agents.yaml:ro
+      - ./agents-docker.yaml:/app/agents.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/.well-known/agent-card.json"]
@@ -46,7 +46,7 @@ services:
     ports:
       - "8003:8003"
     volumes:
-      - ./agents.yaml:/app/agents.yaml:ro
+      - ./agents-docker.yaml:/app/agents.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8003/.well-known/agent-card.json"]
@@ -62,7 +62,7 @@ services:
     ports:
       - "8004:8004"
     volumes:
-      - ./agents.yaml:/app/agents.yaml:ro
+      - ./agents-docker.yaml:/app/agents.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/.well-known/agent-card.json"]
@@ -78,7 +78,7 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ./agents.yaml:/app/agents.yaml:ro
+      - ./agents-docker.yaml:/app/agents.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/.well-known/agent-card.json"]

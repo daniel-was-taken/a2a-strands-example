@@ -1,0 +1,92 @@
+agents:
+  # ── MCP-backed agents (no code needed) ─────────────────────────────────────
+  - name: "Database Reader"
+    type: mcp
+    port: 8001
+    host: "db-reader"
+    description: "Read-only database access: schema inspection and SELECT queries"
+    mcp_url: "https://mcp.neon.tech/mcp"
+    auth:
+      type: bearer
+      env_var: NEON_API_KEY
+    tools: ["get_database_tables", "describe_table_schema", "run_sql"]
+    system_prompt: |
+      You are DatabaseReader, a read-only database assistant.
+
+      Use the available MCP tools to execute read-only SELECT queries and
+      retrieve schema information. Only run SELECT queries. Never modify data.
+
+      Consider tables from all user-defined schemas.
+      Ignore system/internal schemas (pg_catalog, information_schema, etc.).
+      Always query the actual database. Never fabricate schema information.
+    skills:
+      - id: schema-query
+        name: Schema Query
+        description: "Inspect database schema and run read-only SELECT queries"
+        tags: [database, schema, read-only]
+
+  - name: "Database Writer"
+    type: mcp
+    port: 8003
+    host: "db-writer"
+    description: "Write operations: INSERT records into database tables"
+    mcp_url: "https://mcp.neon.tech/mcp"
+    auth:
+      type: bearer
+      env_var: NEON_API_KEY
+    tools: ["get_database_tables", "describe_table_schema", "run_sql"]
+    system_prompt: |
+      You are DatabaseWriter, responsible for INSERT operations.
+
+      You may inspect schema details before inserting data.
+      Only perform INSERT operations or read-only checks needed to support an insert.
+      Do not update, delete, alter, create, or drop database objects.
+
+      Consider tables from all user-defined schemas.
+      Ignore system/internal schemas (pg_catalog, information_schema, etc.).
+      Always query the actual database. Never fabricate schema information.
+    skills:
+      - id: data-insert
+        name: Data Insert
+        description: "Insert records into database tables"
+        tags: [database, insert, write]
+
+  - name: "Database Deleter"
+    type: mcp
+    port: 8004
+    host: "db-deleter"
+    description: "Delete operations: remove records from database tables (requires prior safety approval)"
+    mcp_url: "https://mcp.neon.tech/mcp"
+    auth:
+      type: bearer
+      env_var: NEON_API_KEY
+    tools: ["get_database_tables", "describe_table_schema", "run_sql"]
+    system_prompt: |
+      You are DatabaseDeleter, responsible for DELETE operations.
+
+      You may inspect schema details before deleting data.
+      Only perform DELETE operations or read-only checks needed to support a delete.
+      Do not insert, update, alter, create, or drop database objects.
+
+      Consider tables from all user-defined schemas.
+      Ignore system/internal schemas (pg_catalog, information_schema, etc.).
+      Always query the actual database. Never fabricate schema information.
+    skills:
+      - id: data-delete
+        name: Data Delete
+        description: "Delete records from database tables (requires prior safety approval)"
+        tags: [database, delete, write]
+
+  # ── Custom agents (Python factory) ─────────────────────────────────────────
+  - name: "Graph Agent"
+    type: custom
+    port: 8002
+    host: "graph-agent"
+    description: "Multi-step reasoning workflows with analyze, implement, and review stages"
+    module: "agents.graph_agent"
+    factory: "create_graph_agent"
+    skills:
+      - id: multi-step-reasoning
+        name: Multi-Step Reasoning
+        description: "Analyze, implement, and review through a structured graph workflow"
+        tags: [reasoning, analysis, implementation, review]

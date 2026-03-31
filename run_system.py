@@ -16,7 +16,6 @@ import sys
 import time
 import urllib.request
 
-import yaml
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,9 +23,10 @@ load_dotenv()
 
 def _load_agents_config() -> list[dict]:
     """Load agent definitions from the YAML config."""
+    from agents.mcp_agent import load_agents_config
+
     config_path = os.environ.get("AGENTS_CONFIG", "agents.yaml")
-    with open(config_path) as f:
-        return yaml.safe_load(f)["agents"]
+    return load_agents_config(config_path)
 
 
 def _check_health(port: int, timeout: float = 1.0) -> bool:
