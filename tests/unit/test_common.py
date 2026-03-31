@@ -21,59 +21,52 @@ class TestInMemoryA2ATaskStore:
             status=TaskStatus(state=TaskState.submitted),
         )
 
-    def test_save_and_get(self):
+    async def test_save_and_get(self):
         from common.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
         task = self._make_task("t1")
-        store.save(task)
-        assert store.get("t1") is not None
-        assert store.get("t1").id == "t1"
+        await store.save(task)
+        assert await store.get("t1") is not None
+        assert (await store.get("t1")).id == "t1"
 
-    def test_get_missing_returns_none(self):
+    async def test_get_missing_returns_none(self):
         from common.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
-        assert store.get("nonexistent") is None
+        assert await store.get("nonexistent") is None
 
-    def test_delete_removes_task(self):
+    async def test_delete_removes_task(self):
         from common.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
         task = self._make_task("t2")
-        store.save(task)
-        store.delete("t2")
-        assert store.get("t2") is None
+        await store.save(task)
+        await store.delete("t2")
+        assert await store.get("t2") is None
 
-    def test_delete_nonexistent_does_not_raise(self):
+    async def test_delete_nonexistent_does_not_raise(self):
         from common.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
-        store.delete("nonexistent")  # Should not raise
+        await store.delete("nonexistent")  # Should not raise
 
-    def test_thread_safety(self):
+    async def test_thread_safety(self):
         """Concurrent saves from multiple threads must not corrupt state."""
+        import asyncio
+
         from common.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
-        errors: list[Exception] = []
 
-        def _save_many(prefix: str) -> None:
-            try:
-                for i in range(50):
-                    task = self._make_task(f"{prefix}-{i}")
-                    store.save(task)
-            except Exception as exc:
-                errors.append(exc)
+        async def _save_many(prefix: str) -> None:
+            for i in range(50):
+                task = self._make_task(f"{prefix}-{i}")
+                await store.save(task)
 
-        threads = [threading.Thread(target=_save_many, args=(f"t{n}",)) for n in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        await asyncio.gather(*[_save_many(f"t{n}") for n in range(4)])
 
-        assert not errors, f"Thread-safety errors: {errors}"
-        assert len(store._tasks) == 200  # 4 threads × 50 tasks
+        assert len(store._tasks) == 200  # 4 coroutines × 50 tasks
 
 
 # ── common.logging_setup ──────────────────────────────────────────────────────

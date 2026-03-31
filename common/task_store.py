@@ -38,7 +38,7 @@ class InMemoryA2ATaskStore(TaskStore):
         self._lock = threading.Lock()
         self._tasks: dict[str, Task] = {}
 
-    def get(
+    async def get(
         self,
         task_id: str,
         context: ServerCallContext | None = None,
@@ -46,7 +46,7 @@ class InMemoryA2ATaskStore(TaskStore):
         with self._lock:
             return self._tasks.get(task_id)
 
-    def save(
+    async def save(
         self,
         task: Task,
         context: ServerCallContext | None = None,
@@ -54,7 +54,7 @@ class InMemoryA2ATaskStore(TaskStore):
         with self._lock:
             self._tasks[task.id] = task
 
-    def delete(
+    async def delete(
         self,
         task_id: str,
         context: ServerCallContext | None = None,
