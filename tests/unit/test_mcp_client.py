@@ -1,4 +1,4 @@
-"""Tests for the generic MCP client factory and connection registry."""
+"""Tests for the generic MCP client factory and ReconnectingMCPClient."""
 
 from __future__ import annotations
 
@@ -45,60 +45,33 @@ def test_create_mcp_client_bearer_auth_missing_env():
             )
 
 
-def test_get_mcp_client_creates_and_caches():
-    """get_mcp_client should create a client and cache it by URL."""
-    mock_client = MagicMock()
-    mock_client._background_thread = MagicMock()
-    mock_client._background_thread.is_alive.return_value = True
+def test_create_mcp_client_returns_reconnecting_subclass():
+    """create_mcp_client should return a ReconnectingMCPClient."""
+    with patch("mcp_client.client.streamable_http_client"):
+        from mcp_client.client import ReconnectingMCPClient, create_mcp_client
 
-    with patch("mcp_client.client.create_mcp_client", return_value=mock_client):
-        from mcp_client.client import _clients, get_mcp_client
-
-        _clients.clear()
-        url = "https://example.com/mcp"
-
-        client1 = get_mcp_client(url)
-        client2 = get_mcp_client(url)
-
-        assert client1 is client2
-        mock_client.start.assert_called_once()
+        client = create_mcp_client("https://example.com/mcp")
+        assert isinstance(client, ReconnectingMCPClient)
 
 
-def test_get_mcp_client_reconnects_on_dead_thread():
-    """get_mcp_client should reconnect when the background thread is dead."""
-    dead_client = MagicMock()
-    dead_client._background_thread = MagicMock()
-    dead_client._background_thread.is_alive.return_value = False
+def test_reconnecting_client_calls_stop_and_start_on_dead_session():
+    """ReconnectingMCPClient should stop+start when session is dead."""
+    with patch("mcp_client.client.streamable_http_client"):
+        from mcp_client.client import create_mcp_client
 
-    new_client = MagicMock()
-    new_client._background_thread = MagicMock()
-    new_client._background_thread.is_alive.return_value = True
+        client = create_mcp_client("https://example.com/mcp")
 
-    with patch("mcp_client.client.create_mcp_client", return_value=new_client):
-        from mcp_client.client import _clients, get_mcp_client
+        # Simulate a dead session
+        client._background_thread = MagicMock()
+        client._background_thread.is_alive.return_value = False
+        client._close_future = MagicMock()
+        client._close_future.done.return_value = True
 
-        _clients.clear()
-        url = "https://reconnect.example.com/mcp"
+        # Patch stop and start to prevent actual connection attempts
+        client.stop = MagicMock()
+        client.start = MagicMock()
 
-        # Pre-populate with dead client; get_mcp_client should detect it and reconnect
-        _clients[url] = dead_client
-        result = get_mcp_client(url)
-        assert result is new_client
+        client._reconnect()
 
-
-def test_shutdown_all_stops_all_clients():
-    """shutdown_all should stop every registered client."""
-    client1 = MagicMock()
-    client2 = MagicMock()
-
-    from mcp_client.client import _clients, shutdown_all
-
-    _clients.clear()
-    _clients["url1"] = client1
-    _clients["url2"] = client2
-
-    shutdown_all()
-
-    client1.stop.assert_called_once()
-    client2.stop.assert_called_once()
-    assert len(_clients) == 0
+        client.stop.assert_called_once_with(None, None, None)
+        client.start.assert_called_once()

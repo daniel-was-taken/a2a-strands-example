@@ -43,6 +43,9 @@ agents:
       Consider tables from all user-defined schemas.
       Ignore system/internal schemas (pg_catalog, information_schema, etc.).
       Always query the actual database. Never fabricate schema information.
+
+      If an operation fails (e.g. table not found, constraint violation), report
+      the error clearly and stop. Do not retry the same failing operation.
     skills:
       - id: data-insert
         name: Data Insert
@@ -68,6 +71,9 @@ agents:
       Consider tables from all user-defined schemas.
       Ignore system/internal schemas (pg_catalog, information_schema, etc.).
       Always query the actual database. Never fabricate schema information.
+
+      If an operation fails (e.g. record not found, table does not exist),
+      report the error clearly and stop. Do not retry the same failing operation.
     skills:
       - id: data-delete
         name: Data Delete

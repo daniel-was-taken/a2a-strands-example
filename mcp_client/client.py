@@ -1,41 +1,72 @@
 """Generic MCP client factory and connection registry.
 
-Connects to any MCP server via Streamable HTTP. Clients are cached by URL
-and auto-reconnect when the background thread dies.
+Connects to any MCP server via Streamable HTTP.  The ``create_mcp_client``
+factory returns an ``MCPClient`` subclass that **automatically reconnects**
+when the underlying session dies (e.g. idle-timeout from the MCP server).
 
 Usage::
 
-    from mcp_client.client import get_mcp_client, shutdown_all
+    from mcp_client.client import create_mcp_client
 
-    client = get_mcp_client(
+    client = create_mcp_client(
         "https://mcp.neon.tech/mcp",
         auth={"type": "bearer", "env_var": "NEON_API_KEY"},
     )
-    # ... use client with Strands Agent ...
-    shutdown_all()  # at process exit
+    # pass *client* to a Strands Agent — it reconnects transparently
 """
 
 from __future__ import annotations
 
-import atexit
 import contextlib
 import logging
 import os
-import threading
+from datetime import timedelta
+from typing import Any
 
 import httpx
 from mcp.client.streamable_http import streamable_http_client
 from strands.tools.mcp import MCPClient
+from strands.tools.mcp.mcp_client import MCPToolResult
 
 logger = logging.getLogger(__name__)
 
-_clients: dict[str, MCPClient] = {}
-_lock = threading.Lock()
-_SENTINEL = object()
+
+class ReconnectingMCPClient(MCPClient):
+    """MCPClient that transparently reconnects on a dead session.
+
+    ``MCPClient.stop()`` resets all internal state (including ``_init_future``)
+    so a subsequent ``start()`` establishes a fresh connection.  This subclass
+    intercepts tool calls, detects a dead session, and performs that
+    stop → start cycle before retrying.
+
+    Compatible with strands-agents SDK ~0.1.x.
+    """
+
+    def _reconnect(self) -> None:
+        """Stop the dead session and start a fresh one."""
+        logger.warning("MCP session dead — reconnecting")
+        with contextlib.suppress(Exception):
+            self.stop(None, None, None)
+        self.start()
+        self._tool_provider_started = True
+
+    async def call_tool_async(
+        self,
+        tool_use_id: str,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+        read_timeout_seconds: timedelta | None = None,
+    ) -> MCPToolResult:
+        """Call a tool, reconnecting first if the session is dead."""
+        if not self._is_session_active():
+            self._reconnect()
+        return await super().call_tool_async(
+            tool_use_id, name, arguments, read_timeout_seconds
+        )
 
 
-def create_mcp_client(mcp_url: str, auth: dict | None = None) -> MCPClient:
-    """Create an MCPClient for any MCP server.
+def create_mcp_client(mcp_url: str, auth: dict | None = None) -> ReconnectingMCPClient:
+    """Create a reconnecting MCPClient for any MCP server.
 
     Args:
         mcp_url: The MCP server endpoint URL.
@@ -50,7 +81,7 @@ def create_mcp_client(mcp_url: str, auth: dict | None = None) -> MCPClient:
 
     # httpx.AsyncClient must be created inside the lambda so it's instantiated
     # in the MCPClient background thread's event loop, not the main thread's.
-    return MCPClient(
+    return ReconnectingMCPClient(
         lambda: streamable_http_client(
             mcp_url,
             http_client=httpx.AsyncClient(
@@ -59,53 +90,3 @@ def create_mcp_client(mcp_url: str, auth: dict | None = None) -> MCPClient:
             ),
         ),
     )
-
-
-def _is_healthy(client: MCPClient) -> bool:
-    """Return True if the client's background thread is still running.
-
-    Note: accesses private ``_background_thread`` attr (strands-agents ~0.1.x).
-    """
-    thread = client._background_thread
-    return thread is not None and thread.is_alive()
-
-
-def get_mcp_client(mcp_url: str, auth: dict | None = None) -> MCPClient:
-    """Return a live MCPClient for the given URL, creating or reconnecting as needed.
-
-    Clients are cached by URL. Multiple agents sharing the same MCP URL
-    reuse one connection.
-    """
-    with _lock:
-        client = _clients.get(mcp_url)
-        if client is not None and _is_healthy(client):
-            return client
-
-        if client is not None:
-            logger.warning("MCP connection lost for %s, reconnecting", mcp_url)
-            with contextlib.suppress(Exception):
-                client.stop(None, None, None)
-
-        logger.info("Starting MCP connection to %s", mcp_url)
-        client = create_mcp_client(mcp_url, auth)
-        client.start()
-        client._tool_provider_started = True
-        client.add_consumer(_SENTINEL)
-        _clients[mcp_url] = client
-        return client
-
-
-def shutdown_all() -> None:
-    """Gracefully shut down all MCP connections."""
-    with _lock:
-        for url, client in _clients.items():
-            logger.info("Shutting down MCP connection to %s", url)
-            try:
-                client._consumers.discard(_SENTINEL)
-                client.stop(None, None, None)
-            except Exception:
-                logger.debug("MCP shutdown error for %s (ignored)", url, exc_info=True)
-        _clients.clear()
-
-
-atexit.register(shutdown_all)
