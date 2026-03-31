@@ -59,9 +59,10 @@ def _mock_env(monkeypatch):
 @pytest.fixture(autouse=True)
 def _clear_store():
     """Reset the in-memory store between tests."""
-    from common.store import query_store
+    from common.store import conversation_store
 
-    query_store._records.clear()
+    if hasattr(conversation_store, "_conversations"):
+        conversation_store._conversations.clear()
 
 
 @pytest.fixture(autouse=True)

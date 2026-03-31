@@ -1,113 +1,99 @@
-"""In-memory query store.
+"""In-memory conversation store.
 
-Provides a thread-safe store for query records. Implements the ``QueryStore``
-protocol so it can be swapped for a persistent backend (Redis, PostgreSQL,
-Firestore, etc.) without changing calling code.
+Provides a thread-safe store for conversation records. Implements the
+``ConversationStore`` protocol so it can be swapped for a persistent backend
+(Redis, PostgreSQL, etc.) without changing calling code.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
-from typing import Protocol
+from datetime import UTC, datetime
+from typing import Any, Protocol
 
 from .config import settings
-from .schemas import ActivityEvent, Message, QueryResponse, RequestStatus
+from .schemas import ActivityEvent, Conversation, Message
 
 logger = logging.getLogger(__name__)
 
 
-class QueryStore(Protocol):
-    """Abstract interface for query persistence."""
+class ConversationStore(Protocol):
+    """Abstract interface for conversation persistence."""
 
-    def save(self, record: QueryResponse) -> None: ...
-    def get(self, request_id: str) -> QueryResponse | None: ...
-    def get_by_approval_id(self, approval_id: str) -> QueryResponse | None: ...
-    def list_all(self) -> list[QueryResponse]: ...
-    def add_event(self, request_id: str, event: ActivityEvent) -> None: ...
-    def add_message(self, request_id: str, message: Message) -> None: ...
-    def update_status(
-        self,
-        request_id: str,
-        status: RequestStatus,
-        result: str | None = None,
-        review_verdict: str | None = None,
-        approval_id: str | None = None,
-    ) -> QueryResponse | None: ...
+    def create(self, conversation: Conversation) -> None: ...
+    def get(self, conversation_id: str) -> Conversation | None: ...
+    def list_all(self) -> list[Conversation]: ...
+    def add_message(self, conversation_id: str, message: Message) -> None: ...
+    def add_event(self, conversation_id: str, event: ActivityEvent) -> None: ...
+    def update(self, conversation_id: str, **fields: Any) -> Conversation | None: ...
+    def delete(self, conversation_id: str) -> None: ...
 
 
-class InMemoryStore:
-    """Thread-safe dict-backed implementation of :class:`QueryStore`."""
+class InMemoryConversationStore:
+    """Thread-safe dict-backed implementation of :class:`ConversationStore`."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._records: dict[str, QueryResponse] = {}
+        self._conversations: dict[str, Conversation] = {}
 
-    def save(self, record: QueryResponse) -> None:
+    def create(self, conversation: Conversation) -> None:
         with self._lock:
-            self._records[record.request_id] = record
+            self._conversations[conversation.id] = conversation
 
-    def get(self, request_id: str) -> QueryResponse | None:
+    def get(self, conversation_id: str) -> Conversation | None:
         with self._lock:
-            return self._records.get(request_id)
+            return self._conversations.get(conversation_id)
 
-    def get_by_approval_id(self, approval_id: str) -> QueryResponse | None:
-        with self._lock:
-            for rec in self._records.values():
-                if rec.approval_id == approval_id:
-                    return rec
-            return None
-
-    def list_all(self) -> list[QueryResponse]:
+    def list_all(self) -> list[Conversation]:
         with self._lock:
             return sorted(
-                self._records.values(),
-                key=lambda r: r.created_at,
+                self._conversations.values(),
+                key=lambda c: c.updated_at,
                 reverse=True,
             )
 
-    def add_event(self, request_id: str, event: ActivityEvent) -> None:
+    def add_message(self, conversation_id: str, message: Message) -> None:
         with self._lock:
-            rec = self._records.get(request_id)
-            if rec:
-                rec.events.append(event)
+            conv = self._conversations.get(conversation_id)
+            if conv:
+                conv.messages.append(message)
+                conv.updated_at = datetime.now(UTC).isoformat()
 
-    def add_message(self, request_id: str, message: Message) -> None:
+    def add_event(self, conversation_id: str, event: ActivityEvent) -> None:
         with self._lock:
-            rec = self._records.get(request_id)
-            if rec:
-                rec.messages.append(message)
+            conv = self._conversations.get(conversation_id)
+            if conv:
+                conv.events.append(event)
 
-    def update_status(
-        self,
-        request_id: str,
-        status: RequestStatus,
-        result: str | None = None,
-        review_verdict: str | None = None,
-        approval_id: str | None = None,
-    ) -> QueryResponse | None:
+    def update(self, conversation_id: str, **fields: Any) -> Conversation | None:
         with self._lock:
-            rec = self._records.get(request_id)
-            if rec:
-                rec.status = status
-                if result is not None:
-                    rec.result = result
-                if review_verdict is not None:
-                    rec.review_verdict = review_verdict
-                if approval_id is not None:
-                    rec.approval_id = approval_id
-                return rec
+            conv = self._conversations.get(conversation_id)
+            if conv:
+                for key, value in fields.items():
+                    setattr(conv, key, value)
+                conv.updated_at = datetime.now(UTC).isoformat()
+                return conv
             return None
 
+    def delete(self, conversation_id: str) -> None:
+        with self._lock:
+            self._conversations.pop(conversation_id, None)
 
-def _create_store() -> QueryStore:
+
+def _create_store() -> ConversationStore:
     if settings.store_backend == "postgres":
-        from db.repository import PostgresStore
+        from db.repository import PostgresConversationStore
 
-        logger.info("Using PostgresStore (DATABASE_URL)")
-        return PostgresStore()
-    logger.info("Using InMemoryStore")
-    return InMemoryStore()
+        logger.info("Using PostgresConversationStore (DATABASE_URL)")
+        return PostgresConversationStore()
+    logger.info("Using InMemoryConversationStore")
+    return InMemoryConversationStore()
 
 
-query_store: QueryStore = _create_store()
+conversation_store: ConversationStore = _create_store()
+
+# ---------------------------------------------------------------------------
+# Backward-compatible alias — kept until orchestrator migration (Task 4)
+# ---------------------------------------------------------------------------
+query_store = conversation_store

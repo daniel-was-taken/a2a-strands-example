@@ -1,95 +1,95 @@
-"""Tests for the InMemoryStore."""
+"""Tests for the InMemoryConversationStore."""
 
-from common.schemas import ActivityEvent, Message, QueryResponse, RequestStatus
-from common.store import InMemoryStore
+from common.schemas import ActivityEvent, Conversation, ConversationStatus, Message
+from common.store import InMemoryConversationStore
 
 
-def test_save_and_get():
-    store = InMemoryStore()
-    rec = QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q")
-    store.save(rec)
-    assert store.get("r1") is not None
-    assert store.get("r1").query == "q"
+def test_create_and_get():
+    store = InMemoryConversationStore()
+    conv = Conversation(id="c1", title="Test")
+    store.create(conv)
+    assert store.get("c1") is not None
+    assert store.get("c1").title == "Test"
 
 
 def test_get_missing_returns_none():
-    store = InMemoryStore()
+    store = InMemoryConversationStore()
     assert store.get("missing") is None
 
 
-def test_list_all_ordered_by_created_at():
-    store = InMemoryStore()
-    r1 = QueryResponse(
-        request_id="r1",
-        status=RequestStatus.COMPLETED,
-        query="q1",
-        created_at="2024-01-01T00:00:00",
+def test_list_all_ordered_by_updated_at():
+    store = InMemoryConversationStore()
+    c1 = Conversation(
+        id="c1", title="First", updated_at="2024-01-01T00:00:00"
     )
-    r2 = QueryResponse(
-        request_id="r2",
-        status=RequestStatus.COMPLETED,
-        query="q2",
-        created_at="2024-01-02T00:00:00",
+    c2 = Conversation(
+        id="c2", title="Second", updated_at="2024-01-02T00:00:00"
     )
-    store.save(r1)
-    store.save(r2)
+    store.create(c1)
+    store.create(c2)
     result = store.list_all()
     assert len(result) == 2
-    assert result[0].request_id == "r2"  # newest first
-
-
-def test_update_status():
-    store = InMemoryStore()
-    store.save(QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q"))
-    rec = store.update_status("r1", RequestStatus.FAILED, result="error")
-    assert rec is not None
-    assert rec.status == RequestStatus.FAILED
-    assert rec.result == "error"
-
-
-def test_update_status_review_verdict_and_approval_id():
-    store = InMemoryStore()
-    store.save(QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q"))
-    rec = store.update_status(
-        "r1",
-        RequestStatus.PENDING_APPROVAL,
-        review_verdict="APPROVE: ok",
-        approval_id="abcd1234",
-    )
-    assert rec.review_verdict == "APPROVE: ok"
-    assert rec.approval_id == "abcd1234"
-
-
-def test_get_by_approval_id():
-    store = InMemoryStore()
-    store.save(QueryResponse(request_id="r1", status=RequestStatus.PENDING_APPROVAL, query="q"))
-    store.update_status("r1", RequestStatus.PENDING_APPROVAL, approval_id="abc123")
-    rec = store.get_by_approval_id("abc123")
-    assert rec is not None
-    assert rec.request_id == "r1"
-
-
-def test_get_by_approval_id_missing():
-    store = InMemoryStore()
-    assert store.get_by_approval_id("missing") is None
-
-
-def test_add_event():
-    store = InMemoryStore()
-    store.save(QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q"))
-    store.add_event("r1", ActivityEvent(agent="test", action="did_thing"))
-    rec = store.get("r1")
-    assert len(rec.events) == 1
-    assert rec.events[0].agent == "test"
+    assert result[0].id == "c2"  # newest first
 
 
 def test_add_message():
-    store = InMemoryStore()
-    store.save(QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q"))
-    store.add_message("r1", Message(role="user", content="hello"))
-    store.add_message("r1", Message(role="agent", content="world"))
-    rec = store.get("r1")
-    assert len(rec.messages) == 2
-    assert rec.messages[0].role == "user"
-    assert rec.messages[0].content == "hello"
-    assert rec.messages[1].role == "agent"
+    store = InMemoryConversationStore()
+    store.create(Conversation(id="c1", title="T"))
+    store.add_message("c1", Message(role="user", content="hello"))
+    conv = store.get("c1")
+    assert len(conv.messages) == 1
+    assert conv.messages[0].content == "hello"
+
+
+def test_add_message_updates_updated_at():
+    store = InMemoryConversationStore()
+    conv = Conversation(id="c1", title="T", updated_at="2024-01-01T00:00:00")
+    store.create(conv)
+    store.add_message("c1", Message(role="user", content="hello"))
+    updated = store.get("c1")
+    assert updated.updated_at != "2024-01-01T00:00:00"
+
+
+def test_add_event():
+    store = InMemoryConversationStore()
+    store.create(Conversation(id="c1", title="T"))
+    store.add_event("c1", ActivityEvent(agent="test", action="did"))
+    conv = store.get("c1")
+    assert len(conv.events) == 1
+    assert conv.events[0].agent == "test"
+
+
+def test_update():
+    store = InMemoryConversationStore()
+    store.create(Conversation(id="c1", title="T"))
+    result = store.update(
+        "c1", title="New Title", status=ConversationStatus.AWAITING_APPROVAL
+    )
+    assert result is not None
+    assert result.title == "New Title"
+    assert result.status == ConversationStatus.AWAITING_APPROVAL
+
+
+def test_update_missing_returns_none():
+    store = InMemoryConversationStore()
+    assert store.update("missing", title="X") is None
+
+
+def test_update_updates_updated_at():
+    store = InMemoryConversationStore()
+    conv = Conversation(id="c1", title="T", updated_at="2024-01-01T00:00:00")
+    store.create(conv)
+    store.update("c1", title="X")
+    assert store.get("c1").updated_at != "2024-01-01T00:00:00"
+
+
+def test_delete():
+    store = InMemoryConversationStore()
+    store.create(Conversation(id="c1", title="T"))
+    store.delete("c1")
+    assert store.get("c1") is None
+
+
+def test_delete_missing_does_not_raise():
+    store = InMemoryConversationStore()
+    store.delete("missing")  # should not raise
