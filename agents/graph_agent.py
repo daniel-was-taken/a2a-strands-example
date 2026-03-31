@@ -97,7 +97,14 @@ def create_graph_agent() -> Graph:
     )
     builder.set_entry_point("analyze")
     builder.set_max_node_executions(5)
-    return builder.build()
+    graph = builder.build()
+    # A2AServer reads .name and .description from the agent object.
+    # Graph doesn't define these, so we attach them here.
+    graph.name = "Graph Agent"  # type: ignore[attr-defined]
+    graph.description = (  # type: ignore[attr-defined]
+        "Handles multi-step reasoning workflows with analyze, implement, and review stages"
+    )
+    return graph
 
 
 def serve() -> None:
