@@ -87,8 +87,14 @@ def test_load_agents_config_reads_yaml(tmp_path):
 
     config = {
         "agents": [
-            {"name": "A1", "type": "mcp", "port": 9001, "mcp_url": "https://example.com/mcp",
-             "tools": [], "skills": []},
+            {
+                "name": "A1",
+                "type": "mcp",
+                "port": 9001,
+                "mcp_url": "https://example.com/mcp",
+                "tools": [],
+                "skills": [],
+            },
         ]
     }
     config_path = tmp_path / "agents.yaml"

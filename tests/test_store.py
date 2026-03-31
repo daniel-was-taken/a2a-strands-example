@@ -1,7 +1,7 @@
 """Tests for the InMemoryStore."""
 
-from schemas import ActivityEvent, Message, QueryResponse, RequestStatus
-from store import InMemoryStore
+from common.schemas import ActivityEvent, Message, QueryResponse, RequestStatus
+from common.store import InMemoryStore
 
 
 def test_save_and_get():
@@ -19,8 +19,18 @@ def test_get_missing_returns_none():
 
 def test_list_all_ordered_by_created_at():
     store = InMemoryStore()
-    r1 = QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q1", created_at="2024-01-01T00:00:00")
-    r2 = QueryResponse(request_id="r2", status=RequestStatus.COMPLETED, query="q2", created_at="2024-01-02T00:00:00")
+    r1 = QueryResponse(
+        request_id="r1",
+        status=RequestStatus.COMPLETED,
+        query="q1",
+        created_at="2024-01-01T00:00:00",
+    )
+    r2 = QueryResponse(
+        request_id="r2",
+        status=RequestStatus.COMPLETED,
+        query="q2",
+        created_at="2024-01-02T00:00:00",
+    )
     store.save(r1)
     store.save(r2)
     result = store.list_all()
@@ -41,7 +51,8 @@ def test_update_status_review_verdict_and_approval_id():
     store = InMemoryStore()
     store.save(QueryResponse(request_id="r1", status=RequestStatus.COMPLETED, query="q"))
     rec = store.update_status(
-        "r1", RequestStatus.PENDING_APPROVAL,
+        "r1",
+        RequestStatus.PENDING_APPROVAL,
         review_verdict="APPROVE: ok",
         approval_id="abcd1234",
     )

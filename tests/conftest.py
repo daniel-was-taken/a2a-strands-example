@@ -17,7 +17,6 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-
 # ── Test agents.yaml ─────────────────────────────────────────────────────────
 
 _TEST_AGENTS_CONFIG = {

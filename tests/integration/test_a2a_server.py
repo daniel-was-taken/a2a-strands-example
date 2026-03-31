@@ -107,11 +107,13 @@ async def test_auth_middleware_blocks_without_key():
         from common.auth import AgentAuthMiddleware
         from common.task_store import InMemoryA2ATaskStore
 
-        agent = create_mcp_agent({
-            "name": "Auth Test Agent",
-            "mcp_url": "https://example.com/mcp",
-            "description": "Auth test agent",
-        })
+        agent = create_mcp_agent(
+            {
+                "name": "Auth Test Agent",
+                "mcp_url": "https://example.com/mcp",
+                "description": "Auth test agent",
+            }
+        )
         server = A2AServer(
             agent=agent,
             http_url="http://127.0.0.1:9001/",
@@ -147,11 +149,13 @@ async def test_auth_middleware_allows_agent_card_without_key():
         from common.auth import AgentAuthMiddleware
         from common.task_store import InMemoryA2ATaskStore
 
-        agent = create_mcp_agent({
-            "name": "Auth Card Test",
-            "mcp_url": "https://example.com/mcp",
-            "description": "Auth card test agent",
-        })
+        agent = create_mcp_agent(
+            {
+                "name": "Auth Card Test",
+                "mcp_url": "https://example.com/mcp",
+                "description": "Auth card test agent",
+            }
+        )
         server = A2AServer(
             agent=agent,
             http_url="http://127.0.0.1:9001/",

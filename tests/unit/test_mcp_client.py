@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 def test_create_mcp_client_no_auth():
     """create_mcp_client without auth should create client with no auth headers."""
-    with patch("mcp_client.client.streamable_http_client") as mock_stream:
+    with patch("mcp_client.client.streamable_http_client"):
         from mcp_client.client import create_mcp_client
 
         client = create_mcp_client("https://example.com/mcp")

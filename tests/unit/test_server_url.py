@@ -36,9 +36,7 @@ def test_a2a_server_uses_explicit_http_url():
 
         from common.server import serve_agent
 
-        serve_agent(
-            MagicMock(), name="test", port=8001, http_url="https://api.example.com/"
-        )
+        serve_agent(MagicMock(), name="test", port=8001, http_url="https://api.example.com/")
 
         call_kwargs = mock_a2a.call_args[1]
         assert call_kwargs["http_url"] == "https://api.example.com/"

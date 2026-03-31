@@ -24,9 +24,7 @@ def test_submit_destructive_query_is_rejected(client):
 
 def test_submit_destructive_query_pending_approval(client_approve):
     """Destructive query approved by safety reviewer should be PENDING_APPROVAL."""
-    resp = client_approve.post(
-        "/query", json={"query": "delete from users where id = 5"}
-    )
+    resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
     assert resp.status_code == 201
     data = resp.json()
     assert data["status"] == "PENDING_APPROVAL"
@@ -76,9 +74,7 @@ def test_get_query_not_found(client):
 
 def test_approve_pending_query(client_approve):
     """Approving a PENDING_APPROVAL query should execute it."""
-    post_resp = client_approve.post(
-        "/query", json={"query": "delete from users where id = 5"}
-    )
+    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
     data = post_resp.json()
     assert data["status"] == "PENDING_APPROVAL"
     approval_id = data["approval_id"]
@@ -90,9 +86,7 @@ def test_approve_pending_query(client_approve):
 
 def test_reject_pending_query(client_approve):
     """Rejecting a PENDING_APPROVAL query should mark it REJECTED."""
-    post_resp = client_approve.post(
-        "/query", json={"query": "delete from users where id = 5"}
-    )
+    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
     data = post_resp.json()
     approval_id = data["approval_id"]
 
@@ -104,9 +98,7 @@ def test_reject_pending_query(client_approve):
 def test_approve_non_pending_returns_409(client_approve):
     """Cannot approve a query that is not PENDING_APPROVAL once resolved."""
     # First create a pending query, then reject it, then try to approve via approval_id
-    post_resp = client_approve.post(
-        "/query", json={"query": "delete from users where id = 5"}
-    )
+    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
     data = post_resp.json()
     approval_id = data["approval_id"]
 
@@ -203,9 +195,7 @@ def test_reply_to_completed_query(client):
 
 def test_reply_to_pending_query_returns_409(client_approve):
     """Cannot reply to a query that is not COMPLETED."""
-    post_resp = client_approve.post(
-        "/query", json={"query": "delete from users where id = 5"}
-    )
+    post_resp = client_approve.post("/query", json={"query": "delete from users where id = 5"})
     request_id = post_resp.json()["request_id"]
     assert post_resp.json()["status"] == "PENDING_APPROVAL"
 
@@ -233,8 +223,8 @@ def test_reply_builds_conversation(client):
 def test_reply_message_cap(client):
     """Reply should be rejected once the message cap is reached."""
     from agents.orchestrator_agent import MAX_THREAD_MESSAGES
-    from schemas import Message
-    from store import query_store
+    from common.schemas import Message
+    from common.store import query_store
 
     post_resp = client.post("/query", json={"query": "Show all tables"})
     request_id = post_resp.json()["request_id"]
