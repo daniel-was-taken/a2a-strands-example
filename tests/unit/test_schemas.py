@@ -1,5 +1,8 @@
 """Tests for the conversation data models."""
 
+import pytest
+from pydantic import ValidationError
+
 from common.schemas import (
     ActivityEvent,
     Conversation,
@@ -64,9 +67,7 @@ def test_message_request_valid():
 
 
 def test_message_request_empty_rejected():
-    import pytest
-
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         MessageRequest(content="")
 
 
