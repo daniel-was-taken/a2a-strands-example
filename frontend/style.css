@@ -1,4 +1,6 @@
-/* ── Reset & Base ─────────────────────────────────────────────────────── */
+/* frontend/style.css */
+
+/* -- Reset & Base --------------------------------------------------------- */
 
 *,
 *::before,
@@ -45,14 +47,14 @@ body {
   overflow: hidden;
 }
 
-/* ── Layout ──────────────────────────────────────────────────────────── */
+/* -- Layout --------------------------------------------------------------- */
 
 .layout {
   display: flex;
   height: 100vh;
 }
 
-/* ── Sidebar ─────────────────────────────────────────────────────────── */
+/* -- Sidebar -------------------------------------------------------------- */
 
 .sidebar {
   width: 320px;
@@ -65,22 +67,48 @@ body {
 
 .sidebar-header {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--border);
 }
 
-.sidebar-header h1 {
+.sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-title h1 {
   font-size: 16px;
   font-weight: 600;
 }
 
-.sidebar-header .icon {
+.sidebar-title .icon {
   width: 20px;
   height: 20px;
   color: var(--primary);
   flex-shrink: 0;
+}
+
+.new-chat-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.new-chat-btn:hover {
+  background: var(--bg);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .sidebar-content {
@@ -89,9 +117,10 @@ body {
   padding: 8px;
 }
 
-/* Query list items */
-.query-item {
-  display: block;
+/* Conversation list items */
+.conv-item {
+  display: flex;
+  align-items: center;
   width: 100%;
   text-align: left;
   padding: 10px 12px;
@@ -102,40 +131,63 @@ body {
   font: inherit;
   color: var(--text);
   transition: background .15s;
+  gap: 8px;
 }
 
-.query-item:hover {
+.conv-item:hover {
   background: var(--bg);
 }
 
-.query-item.active {
+.conv-item.active {
   background: #eef2ff;
   color: var(--primary);
 }
 
-.query-item-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.query-item-text {
+.conv-item-body {
   flex: 1;
   min-width: 0;
+}
+
+.conv-item-title {
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.query-item-time {
+.conv-item-time {
   font-size: 12px;
   color: var(--text-light);
   margin-top: 2px;
 }
 
-/* ── Empty state ─────────────────────────────────────────────────────── */
+.conv-item-warning {
+  color: var(--yellow);
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.conv-item .delete-btn {
+  opacity: 0;
+  background: none;
+  border: none;
+  color: var(--text-light);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+  flex-shrink: 0;
+  transition: opacity .15s, color .15s;
+}
+
+.conv-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.conv-item .delete-btn:hover {
+  color: var(--red);
+}
+
+/* -- Empty state ---------------------------------------------------------- */
 
 .empty-state {
   text-align: center;
@@ -153,7 +205,7 @@ body {
   margin-top: 4px;
 }
 
-/* ── Main area ───────────────────────────────────────────────────────── */
+/* -- Main area ------------------------------------------------------------ */
 
 .main {
   flex: 1;
@@ -198,7 +250,7 @@ body {
   margin-top: 4px;
 }
 
-/* ── Input bar ───────────────────────────────────────────────────────── */
+/* -- Input bar ------------------------------------------------------------ */
 
 .input-bar {
   border-top: 1px solid var(--border);
@@ -235,6 +287,11 @@ body {
   color: var(--text-light);
 }
 
+.input-form textarea:disabled {
+  background: var(--bg);
+  color: var(--text-light);
+}
+
 .input-form button {
   display: inline-flex;
   align-items: center;
@@ -265,80 +322,63 @@ body {
   height: 16px;
 }
 
-/* ── Status badges ───────────────────────────────────────────────────── */
+/* -- Chat thread ---------------------------------------------------------- */
 
-.badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  border-radius: 9999px;
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.badge-COMPLETED        { background: var(--green-bg);  color: var(--green-text);  }
-.badge-PENDING_APPROVAL { background: var(--yellow-bg); color: var(--yellow-text); }
-.badge-RECOMMENDED_REJECT { background: var(--orange-bg); color: var(--orange-text); }
-.badge-REJECTED         { background: var(--red-bg);    color: var(--red-text);    }
-.badge-FAILED           { background: var(--red-bg);    color: var(--red-text);    }
-
-/* ── Query result card ───────────────────────────────────────────────── */
-
-.result-card {
-  background: var(--white);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  box-shadow: var(--shadow);
-}
-
-.result-header {
+.chat-thread {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.result-query {
-  font-weight: 500;
-  flex: 1;
-  min-width: 0;
+.chat-msg {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
-.result-id {
-  font-size: 12px;
-  color: var(--text-light);
-  margin-top: 2px;
-  font-family: var(--mono);
+.chat-msg-user {
+  align-self: flex-end;
+  background: #eef2ff;
+  color: var(--text);
+  border-bottom-right-radius: 2px;
 }
 
-.result-body {
+.chat-msg-agent {
+  align-self: flex-start;
   background: var(--bg);
-  border-radius: 6px;
-  padding: 12px;
-  margin-top: 12px;
+  color: var(--text);
+  border-bottom-left-radius: 2px;
 }
 
-.result-body pre {
+.chat-msg-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.chat-msg-user .chat-msg-label {
+  text-align: right;
+  color: var(--primary);
+}
+
+.chat-msg-time {
+  font-weight: 400;
+  color: var(--text-light);
+  margin-left: 6px;
+}
+
+.chat-msg-content pre {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--text);
   margin: 0;
 }
 
-.result-verdict {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-style: italic;
-  margin-top: 8px;
-}
-
-/* ── Approval dialog ─────────────────────────────────────────────────── */
+/* -- Approval dialog (inline) --------------------------------------------- */
 
 .approval-box {
   border: 1px solid var(--yellow-border);
@@ -393,10 +433,31 @@ body {
 .btn-reject  { background: var(--red); }
 .btn-reject:hover  { background: #b91c1c; }
 
-/* ── Activity log ────────────────────────────────────────────────────── */
+.approval-box-reject {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.approval-box-reject h3 {
+  color: var(--red-text);
+}
+
+.approval-box-reject p {
+  color: var(--red-text);
+}
+
+/* -- Activity log --------------------------------------------------------- */
 
 .activity-log {
   margin-top: 16px;
+}
+
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 6px 0;
 }
 
 .activity-title {
@@ -405,7 +466,23 @@ body {
   text-transform: uppercase;
   letter-spacing: .05em;
   color: var(--text-muted);
-  margin-bottom: 8px;
+}
+
+.activity-toggle {
+  background: none;
+  border: none;
+  color: var(--text-light);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.activity-body {
+  overflow: hidden;
+  transition: max-height .2s ease;
+}
+
+.activity-body.collapsed {
+  max-height: 0;
 }
 
 .activity-list {
@@ -447,15 +524,13 @@ body {
 .agent-orchestrator   { color: var(--primary); }
 .agent-safety_reviewer { color: var(--yellow); }
 .agent-human          { color: var(--green); }
-.agent-database_agent { color: #2563eb; }
 
 .activity-detail {
   color: var(--text-muted);
   margin-top: 2px;
-  margin-left: 0;
 }
 
-/* ── Toast ───────────────────────────────────────────────────────────── */
+/* -- Toast ---------------------------------------------------------------- */
 
 .toast-container {
   position: fixed;
@@ -497,7 +572,7 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Spinner ─────────────────────────────────────────────────────────── */
+/* -- Spinner -------------------------------------------------------------- */
 
 .spinner {
   display: inline-block;
@@ -513,7 +588,7 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* ── Mobile menu ─────────────────────────────────────────────────────── */
+/* -- Mobile menu ---------------------------------------------------------- */
 
 .menu-btn {
   display: none;
@@ -546,7 +621,7 @@ body {
   display: block;
 }
 
-/* ── Responsive ──────────────────────────────────────────────────────── */
+/* -- Responsive ----------------------------------------------------------- */
 
 @media (max-width: 768px) {
   .sidebar {
@@ -576,7 +651,7 @@ body {
   }
 }
 
-/* ── Log panel ───────────────────────────────────────────────────────── */
+/* -- Log panel ------------------------------------------------------------ */
 
 .log-panel {
   width: 100%;
@@ -640,75 +715,3 @@ body {
 .log-INFO    { color: #89b4fa; }
 .log-WARNING { color: #f9e2af; }
 .log-ERROR   { color: #f38ba8; }
-
-/* ── Recommended Reject approval box ─────────────────────────────────── */
-
-.approval-box-reject {
-  border-color: #fca5a5;
-  background: #fef2f2;
-}
-
-.approval-box-reject h3 {
-  color: var(--red-text);
-}
-
-.approval-box-reject p {
-  color: var(--red-text);
-}
-
-/* ── Chat thread ─────────────────────────────────────────────────────── */
-
-.chat-thread {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.chat-msg {
-  max-width: 85%;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.chat-msg-user {
-  align-self: flex-end;
-  background: #eef2ff;
-  color: var(--text);
-  border-bottom-right-radius: 2px;
-}
-
-.chat-msg-agent {
-  align-self: flex-start;
-  background: var(--bg);
-  color: var(--text);
-  border-bottom-left-radius: 2px;
-}
-
-.chat-msg-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-
-.chat-msg-user .chat-msg-label {
-  text-align: right;
-  color: var(--primary);
-}
-
-.chat-msg-time {
-  font-weight: 400;
-  color: var(--text-light);
-  margin-left: 6px;
-}
-
-.chat-msg-content pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: var(--mono);
-  font-size: 12px;
-  margin: 0;
-}

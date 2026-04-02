@@ -1,14 +1,13 @@
+// frontend/app.js
 /**
- * A2A Database Orchestrator — Frontend Application
+ * A2A Orchestrator — Frontend Application
  *
- * Vanilla JS client for the orchestrator REST API.
- * All API interaction goes through the ApiClient class so the
- * base URL / headers can be swapped for a different backend.
+ * Vanilla JS client for the conversation-based orchestrator API.
  */
 
 "use strict";
 
-/* ── API Client ──────────────────────────────────────────────────────── */
+/* -- API Client ----------------------------------------------------------- */
 
 class ApiClient {
   constructor(baseUrl = "") {
@@ -24,52 +23,46 @@ class ApiClient {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.detail || `Request failed: ${res.status}`);
     }
+    if (res.status === 204) return null;
     return res.json();
   }
 
-  healthCheck()            { return this._request("/health"); }
-  submitQuery(query)       { return this._request("/query", { method: "POST", body: JSON.stringify({ query }) }); }
-  getQueries()             { return this._request("/queries"); }
-  getQuery(id)             { return this._request(`/queries/${encodeURIComponent(id)}`); }
-  approveQuery(approvalId) { return this._request(`/queries/approve/${encodeURIComponent(approvalId)}`, { method: "POST" }); }
-  rejectQuery(approvalId)  { return this._request(`/queries/reject/${encodeURIComponent(approvalId)}`,  { method: "POST" }); }
-  replyQuery(id, query)    { return this._request(`/query/${encodeURIComponent(id)}/reply`, { method: "POST", body: JSON.stringify({ query }) }); }
+  createConversation()      { return this._request("/conversations", { method: "POST" }); }
+  getConversations()        { return this._request("/conversations"); }
+  getConversation(id)       { return this._request(`/conversations/${encodeURIComponent(id)}`); }
+  deleteConversation(id)    { return this._request(`/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }); }
+  sendMessage(id, content)  { return this._request(`/conversations/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ content }) }); }
+  approve(id)               { return this._request(`/conversations/${encodeURIComponent(id)}/approve`, { method: "POST" }); }
+  reject(id)                { return this._request(`/conversations/${encodeURIComponent(id)}/reject`, { method: "POST" }); }
 }
 
 const api = new ApiClient();
 
-/* ── State ───────────────────────────────────────────────────────────── */
+/* -- State ---------------------------------------------------------------- */
 
-let queries = [];
+let conversations = [];
 let selectedId = null;
+let currentConv = null;
 let pollTimer = null;
-let detailTimer = null;
 
-/* ── DOM refs ────────────────────────────────────────────────────────── */
+/* -- DOM refs ------------------------------------------------------------- */
 
 const $ = (sel) => document.querySelector(sel);
-const sidebar      = $("#sidebar");
-const backdrop     = $("#backdrop");
-const menuBtn      = $("#menu-btn");
-const queryList    = $("#query-list");
-const contentArea  = $("#content-area");
-const queryForm    = $("#query-form");
-const queryInput   = $("#query-input");
-const submitBtn    = $("#submit-btn");
-const toastBox     = $("#toast-container");
-const logPanel     = $("#log-panel");
-const logToggle    = $("#log-toggle");
-const logBody      = $("#log-body");
+const sidebar       = $("#sidebar");
+const backdrop      = $("#backdrop");
+const menuBtn       = $("#menu-btn");
+const convList      = $("#conversation-list");
+const contentArea   = $("#content-area");
+const messageForm   = $("#message-form");
+const messageInput  = $("#message-input");
+const sendBtn       = $("#send-btn");
+const toastBox      = $("#toast-container");
+const logPanel      = $("#log-panel");
+const logToggle     = $("#log-toggle");
+const logBody       = $("#log-body");
+const newChatBtn    = $("#new-chat-btn");
 
-/* ── Helpers ─────────────────────────────────────────────────────────── */
-
-const STATUS_LABELS = {
-  COMPLETED: "Completed",
-  PENDING_APPROVAL: "Pending Approval",
-  RECOMMENDED_REJECT: "Recommended Reject",
-  REJECTED: "Rejected",
-  FAILED: "Failed",
-};
+/* -- Helpers -------------------------------------------------------------- */
 
 function fmtTime(iso) {
   try { return new Date(iso).toLocaleTimeString(); }
@@ -91,148 +84,50 @@ function showToast(msg) {
   setTimeout(() => el.remove(), 6000);
 }
 
-/* ── Render: sidebar query list ──────────────────────────────────────── */
+/* -- Render: sidebar conversation list ------------------------------------ */
 
-function renderQueryList() {
-  if (!queries.length) {
-    queryList.innerHTML = `
+function renderSidebar() {
+  if (!conversations.length) {
+    convList.innerHTML = `
       <div class="empty-state">
-        <p class="empty-title">No queries yet</p>
-        <p class="empty-sub">Submit a query to get started</p>
+        <p class="empty-title">No conversations yet</p>
+        <p class="empty-sub">Start a new chat to begin</p>
       </div>`;
     return;
   }
 
-  queryList.innerHTML = queries.map((q) => `
-    <button class="query-item ${q.request_id === selectedId ? "active" : ""}"
-            data-id="${escapeHtml(q.request_id)}">
-      <div class="query-item-top">
-        <span class="query-item-text">${escapeHtml(q.query)}</span>
-        <span class="badge badge-${q.status}">${STATUS_LABELS[q.status] || q.status}</span>
+  convList.innerHTML = conversations.map((c) => `
+    <div class="conv-item ${c.id === selectedId ? "active" : ""}" data-id="${escapeHtml(c.id)}">
+      <div class="conv-item-body">
+        <div class="conv-item-title">${escapeHtml(c.title)}</div>
+        <div class="conv-item-time">${fmtTime(c.updated_at)}</div>
       </div>
-      <div class="query-item-time">${fmtTime(q.created_at)}</div>
-    </button>
+      ${c.status === "awaiting_approval" ? '<span class="conv-item-warning" title="Awaiting approval">&#9888;</span>' : ""}
+      <button class="delete-btn" data-delete="${escapeHtml(c.id)}" title="Delete conversation">&times;</button>
+    </div>
   `).join("");
 
-  queryList.querySelectorAll(".query-item").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectedId = btn.dataset.id;
-      renderQueryList();
-      renderDetail();
+  convList.querySelectorAll(".conv-item").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".delete-btn")) return;
+      selectConversation(el.dataset.id);
       closeSidebar();
-      startDetailPoll();
-      updateInputPlaceholder();
     });
   });
-}
 
-/* ── Render: main content area ───────────────────────────────────────── */
-
-function renderDetail() {
-  const q = queries.find((q) => q.request_id === selectedId);
-  if (!q) {
-    contentArea.innerHTML = `
-      <div class="welcome">
-        <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>
-        </svg>
-        <h2>A2A Database Orchestrator</h2>
-        <p>Submit a query below or select one from the sidebar</p>
-      </div>`;
-    return;
-  }
-
-  let html = `<div class="result-card">`;
-
-  // Header
-  html += `
-    <div class="result-header">
-      <div>
-        <div class="result-query">${escapeHtml(q.query)}</div>
-        <div class="result-id">${escapeHtml(q.request_id.slice(0, 8))}…</div>
-      </div>
-      <span class="badge badge-${q.status}">${STATUS_LABELS[q.status] || q.status}</span>
-    </div>`;
-
-  // Approval dialog — shown for PENDING_APPROVAL and RECOMMENDED_REJECT
-  if ((q.status === "PENDING_APPROVAL" || q.status === "RECOMMENDED_REJECT") && q.review_verdict) {
-    const heading = q.status === "RECOMMENDED_REJECT"
-      ? "Safety Reviewer Recommends Rejection"
-      : "Human Approval Required";
-    const desc = q.status === "RECOMMENDED_REJECT"
-      ? "The safety reviewer recommends rejecting this query. You may override this decision."
-      : "The safety reviewer approved this destructive query, but it requires your confirmation before execution.";
-    html += `
-      <div class="approval-box${q.status === 'RECOMMENDED_REJECT' ? ' approval-box-reject' : ''}">
-        <h3>${heading}</h3>
-        <p>${desc}</p>
-        <div class="approval-verdict">${escapeHtml(q.review_verdict)}</div>
-        <div class="approval-actions">
-          <button class="btn-approve" data-action="approve" data-id="${escapeHtml(q.approval_id)}">
-            &#10003; Approve &amp; Execute
-          </button>
-          <button class="btn-reject" data-action="reject" data-id="${escapeHtml(q.approval_id)}">
-            &#10007; Reject
-          </button>
-        </div>
-      </div>`;
-  }
-
-  // Conversation thread (messages) — shown for completed queries with messages
-  if (q.messages && q.messages.length) {
-    html += `<div class="chat-thread">`;
-    for (const msg of q.messages) {
-      const isUser = msg.role === "user";
-      html += `
-        <div class="chat-msg ${isUser ? 'chat-msg-user' : 'chat-msg-agent'}">
-          <div class="chat-msg-label">${isUser ? 'You' : 'Agent'} <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
-          <div class="chat-msg-content">${isUser ? escapeHtml(msg.content) : '<pre>' + escapeHtml(msg.content) + '</pre>'}</div>
-        </div>`;
-    }
-    html += `</div>`;
-  } else if (q.result && q.status !== "PENDING_APPROVAL" && q.status !== "RECOMMENDED_REJECT") {
-    // Fallback: show plain result for queries without messages
-    html += `<div class="result-body"><pre>${escapeHtml(q.result)}</pre></div>`;
-  }
-
-  // Verdict (when not pending)
-  if (q.review_verdict && q.status !== "PENDING_APPROVAL" && q.status !== "RECOMMENDED_REJECT") {
-    html += `<div class="result-verdict">Safety verdict: ${escapeHtml(q.review_verdict)}</div>`;
-  }
-
-  // Activity log
-  if (q.events && q.events.length) {
-    html += `
-      <div class="activity-log">
-        <div class="activity-title">Agent Activity</div>
-        <ul class="activity-list">
-          ${q.events.map((e) => `
-            <li>
-              <div class="activity-meta">
-                <span>${fmtTime(e.timestamp)}</span>
-                <span class="activity-agent agent-${e.agent}">${escapeHtml(e.agent)}</span>
-                <span>${escapeHtml(e.action)}</span>
-              </div>
-              ${e.detail ? `<div class="activity-detail">${escapeHtml(e.detail)}</div>` : ""}
-            </li>
-          `).join("")}
-        </ul>
-      </div>`;
-  }
-
-  html += `</div>`;
-  contentArea.innerHTML = html;
-
-  // Wire approval buttons
-  contentArea.querySelectorAll("[data-action]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const action = btn.dataset.action;
-      const id = btn.dataset.id;
+  convList.querySelectorAll(".delete-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.delete;
       try {
-        if (action === "approve") await api.approveQuery(id);
-        else                      await api.rejectQuery(id);
-        await fetchQueries();
-        renderDetail();
+        await api.deleteConversation(id);
+        if (selectedId === id) {
+          selectedId = null;
+          currentConv = null;
+          renderContent();
+          updateInput();
+        }
+        await fetchConversations();
       } catch (err) {
         showToast(err.message);
       }
@@ -240,55 +135,172 @@ function renderDetail() {
   });
 }
 
-/* ── Data fetching ───────────────────────────────────────────────────── */
+/* -- Render: main content area -------------------------------------------- */
 
-async function fetchQueries() {
-  try {
-    queries = await api.getQueries();
-    renderQueryList();
-    // Update detail if selected
-    if (selectedId) renderDetail();
-  } catch (err) {
-    console.error("Failed to fetch queries:", err);
+function renderContent() {
+  if (!currentConv) {
+    contentArea.innerHTML = `
+      <div class="welcome">
+        <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>
+        </svg>
+        <h2>A2A Orchestrator</h2>
+        <p>Start a new chat or select a conversation from the sidebar</p>
+      </div>`;
+    return;
+  }
+
+  const c = currentConv;
+  let html = "";
+
+  // Messages
+  if (c.messages && c.messages.length) {
+    html += `<div class="chat-thread">`;
+    for (const msg of c.messages) {
+      const isUser = msg.role === "user";
+      html += `
+        <div class="chat-msg ${isUser ? "chat-msg-user" : "chat-msg-agent"}">
+          <div class="chat-msg-label">${isUser ? "You" : "Agent"} <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
+          <div class="chat-msg-content">${isUser ? escapeHtml(msg.content) : "<pre>" + escapeHtml(msg.content) + "</pre>"}</div>
+        </div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Approval dialog
+  if (c.status === "awaiting_approval" && c.review_verdict) {
+    const isReject = c.review_recommended_reject;
+    const heading = isReject
+      ? "Safety Reviewer Recommends Rejection"
+      : "Human Approval Required";
+    const desc = isReject
+      ? "The safety reviewer recommends rejecting this query. You may override this decision."
+      : "The safety reviewer approved this destructive query, but it requires your confirmation before execution.";
+    html += `
+      <div class="approval-box${isReject ? " approval-box-reject" : ""}">
+        <h3>${heading}</h3>
+        <p>${desc}</p>
+        <div class="approval-verdict">${escapeHtml(c.review_verdict)}</div>
+        <div class="approval-actions">
+          <button class="btn-approve" data-action="approve">&#10003; Approve &amp; Execute</button>
+          <button class="btn-reject" data-action="reject">&#10007; Reject</button>
+        </div>
+      </div>`;
+  }
+
+  // Activity log
+  if (c.events && c.events.length) {
+    html += `
+      <div class="activity-log">
+        <div class="activity-header" id="activity-toggle">
+          <span class="activity-title">Agent Activity (${c.events.length})</span>
+          <button class="activity-toggle">Show</button>
+        </div>
+        <div class="activity-body collapsed" id="activity-body">
+          <ul class="activity-list">
+            ${c.events.map((e) => `
+              <li>
+                <div class="activity-meta">
+                  <span>${fmtTime(e.timestamp)}</span>
+                  <span class="activity-agent agent-${e.agent}">${escapeHtml(e.agent)}</span>
+                  <span>${escapeHtml(e.action)}</span>
+                </div>
+                ${e.detail ? `<div class="activity-detail">${escapeHtml(e.detail)}</div>` : ""}
+              </li>
+            `).join("")}
+          </ul>
+        </div>
+      </div>`;
+  }
+
+  contentArea.innerHTML = html;
+
+  // Wire approval buttons
+  contentArea.querySelectorAll("[data-action]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.action;
+      try {
+        if (action === "approve") currentConv = await api.approve(c.id);
+        else                      currentConv = await api.reject(c.id);
+        renderContent();
+        updateInput();
+        await fetchConversations();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+  });
+
+  // Wire activity toggle
+  const actToggle = $("#activity-toggle");
+  if (actToggle) {
+    actToggle.addEventListener("click", () => {
+      const body = $("#activity-body");
+      const btn = actToggle.querySelector(".activity-toggle");
+      body.classList.toggle("collapsed");
+      btn.textContent = body.classList.contains("collapsed") ? "Show" : "Hide";
+    });
+  }
+
+  // Auto-scroll to bottom
+  const mainScroll = $("#main-scroll");
+  mainScroll.scrollTop = mainScroll.scrollHeight;
+}
+
+/* -- Input state ---------------------------------------------------------- */
+
+function updateInput() {
+  const awaiting = currentConv && currentConv.status === "awaiting_approval";
+  messageInput.disabled = awaiting || !selectedId;
+  sendBtn.disabled = awaiting || !selectedId || !messageInput.value.trim();
+  if (awaiting) {
+    messageInput.placeholder = "Awaiting approval...";
+  } else if (!selectedId) {
+    messageInput.placeholder = "Start a new chat to begin...";
+  } else {
+    messageInput.placeholder = "Type a message...";
   }
 }
 
-async function fetchDetail() {
-  if (!selectedId) return;
+/* -- Data fetching -------------------------------------------------------- */
+
+async function fetchConversations() {
   try {
-    const q = await api.getQuery(selectedId);
-    // Replace in local array
-    const idx = queries.findIndex((x) => x.request_id === selectedId);
-    if (idx >= 0) queries[idx] = q;
-    else queries.unshift(q);
-    renderQueryList();
-    renderDetail();
-    // Stop polling if terminal
-    if (["COMPLETED", "REJECTED", "FAILED"].includes(q.status)) {
-      stopDetailPoll();
-    }
-  } catch { /* ignore transient */ }
+    conversations = await api.getConversations();
+    renderSidebar();
+  } catch (err) {
+    console.error("Failed to fetch conversations:", err);
+  }
+}
+
+async function fetchConversation(id) {
+  try {
+    currentConv = await api.getConversation(id);
+    renderContent();
+    updateInput();
+  } catch (err) {
+    console.error("Failed to fetch conversation:", err);
+  }
+}
+
+async function selectConversation(id) {
+  selectedId = id;
+  renderSidebar();
+  await fetchConversation(id);
 }
 
 function startPoll() {
   stopPoll();
-  pollTimer = setInterval(fetchQueries, 4000);
+  pollTimer = setInterval(async () => {
+    if (selectedId) await fetchConversation(selectedId);
+  }, 3000);
 }
 
 function stopPoll() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
-function startDetailPoll() {
-  stopDetailPoll();
-  detailTimer = setInterval(fetchDetail, 2000);
-}
-
-function stopDetailPoll() {
-  if (detailTimer) { clearInterval(detailTimer); detailTimer = null; }
-}
-
-/* ── Mobile sidebar ──────────────────────────────────────────────────── */
+/* -- Mobile sidebar ------------------------------------------------------- */
 
 function openSidebar()  { sidebar.classList.add("open"); backdrop.classList.add("open"); }
 function closeSidebar() { sidebar.classList.remove("open"); backdrop.classList.remove("open"); }
@@ -298,74 +310,67 @@ menuBtn.addEventListener("click", () => {
 });
 backdrop.addEventListener("click", closeSidebar);
 
-/* ── Form handling ───────────────────────────────────────────────────── */
+/* -- New chat ------------------------------------------------------------- */
 
-queryInput.addEventListener("input", () => {
-  submitBtn.disabled = !queryInput.value.trim();
-});
-
-queryInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    queryForm.requestSubmit();
+newChatBtn.addEventListener("click", async () => {
+  try {
+    const conv = await api.createConversation();
+    selectedId = conv.id;
+    currentConv = conv;
+    await fetchConversations();
+    renderContent();
+    updateInput();
+    messageInput.focus();
+    closeSidebar();
+  } catch (err) {
+    showToast(err.message);
   }
 });
 
-queryForm.addEventListener("submit", async (e) => {
+/* -- Form handling -------------------------------------------------------- */
+
+messageInput.addEventListener("input", () => {
+  sendBtn.disabled = !messageInput.value.trim() || !selectedId;
+});
+
+messageInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    messageForm.requestSubmit();
+  }
+});
+
+messageForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const text = queryInput.value.trim();
-  if (!text) return;
+  const text = messageInput.value.trim();
+  if (!text || !selectedId) return;
 
-  // Determine if this is a reply to an existing completed query
-  const replyTarget = selectedId
-    ? queries.find((q) => q.request_id === selectedId && q.status === "COMPLETED")
-    : null;
-
-  submitBtn.disabled = true;
-  submitBtn.innerHTML = '<span class="spinner"></span> Sending…';
+  sendBtn.disabled = true;
+  sendBtn.innerHTML = '<span class="spinner"></span> Sending...';
 
   try {
-    let res;
-    if (replyTarget) {
-      res = await api.replyQuery(replyTarget.request_id, text);
-      selectedId = res.request_id;
-    } else {
-      res = await api.submitQuery(text);
-      selectedId = res.request_id;
-    }
-    queryInput.value = "";
-    await fetchQueries();
-    renderDetail();
-    updateInputPlaceholder();
-    if (!replyTarget) startDetailPoll();
+    currentConv = await api.sendMessage(selectedId, text);
+    messageInput.value = "";
+    renderContent();
+    updateInput();
+    await fetchConversations();
   } catch (err) {
     showToast(err.message);
   } finally {
-    submitBtn.disabled = !queryInput.value.trim();
-    submitBtn.innerHTML = `
+    sendBtn.disabled = !messageInput.value.trim() || !selectedId;
+    sendBtn.innerHTML = `
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
       </svg> Send`;
   }
 });
 
-/* ── Input placeholder update ────────────────────────────────────────── */
+/* -- Init ----------------------------------------------------------------- */
 
-function updateInputPlaceholder() {
-  const q = selectedId ? queries.find((q) => q.request_id === selectedId) : null;
-  if (q && q.status === "COMPLETED") {
-    queryInput.placeholder = "Reply to this conversation…";
-  } else {
-    queryInput.placeholder = "Enter a database query… e.g. 'Show all tables' or 'Insert a new user'";
-  }
-}
+fetchConversations();
+updateInput();
 
-/* ── Init ────────────────────────────────────────────────────────────── */
-
-fetchQueries();
-startPoll();
-
-/* ── SSE Log Stream ───────────────────────────────────────────────────────── */
+/* -- SSE Log Stream ------------------------------------------------------- */
 
 function connectLogStream() {
   const evtSource = new EventSource("/logs/stream");
@@ -376,7 +381,6 @@ function connectLogStream() {
       line.className = `log-line log-${data.level}`;
       line.textContent = `[${data.level}] ${data.logger}: ${data.message}`;
       logBody.appendChild(line);
-      // Keep max 200 lines
       while (logBody.children.length > 200) logBody.removeChild(logBody.firstChild);
       logBody.scrollTop = logBody.scrollHeight;
     } catch { /* ignore malformed */ }
