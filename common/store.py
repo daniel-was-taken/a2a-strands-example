@@ -92,8 +92,3 @@ def _create_store() -> ConversationStore:
 
 
 conversation_store: ConversationStore = _create_store()
-
-# ---------------------------------------------------------------------------
-# Backward-compatible alias — kept until orchestrator migration (Task 4)
-# ---------------------------------------------------------------------------
-query_store = conversation_store

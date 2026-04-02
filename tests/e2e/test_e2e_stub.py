@@ -1,3 +1,4 @@
+# tests/e2e/test_e2e_stub.py
 """End-to-end tests — orchestrator → specialist agent round-trip.
 
 These tests require live infrastructure (MCP server, Gemini API key) and are
@@ -68,18 +69,27 @@ async def test_graph_agent_card_reachable():
 
 
 @pytest.mark.asyncio
-async def test_full_schema_query_round_trip():
-    """Full round-trip: orchestrator → database agent → response."""
+async def test_full_conversation_round_trip():
+    """Full round-trip: create conversation → send message → get response."""
     import httpx
 
     orchestrator_url = os.environ.get("ORCHESTRATOR_URL", "http://localhost:8000")
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{orchestrator_url}/query",
-            json={"query": "List all tables in the database"},
+        # Create conversation
+        create_resp = await client.post(
+            f"{orchestrator_url}/conversations",
+            timeout=10,
+        )
+        assert create_resp.status_code == 201
+        conv_id = create_resp.json()["id"]
+
+        # Send message
+        msg_resp = await client.post(
+            f"{orchestrator_url}/conversations/{conv_id}/messages",
+            json={"content": "List all tables in the database"},
             timeout=120,
         )
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["status"] == "COMPLETED"
-    assert data["result"]
+        assert msg_resp.status_code == 200
+        data = msg_resp.json()
+        assert data["status"] == "active"
+        assert len(data["messages"]) >= 2
