@@ -1,59 +1,58 @@
-"""PostgreSQL-backed query store.
+# db/repository.py
+"""PostgreSQL-backed conversation store.
 
 Uses psycopg2 for synchronous access. Connection parameters come from the
 DATABASE_URL environment variable (standard ``postgres://...`` connection string).
 
-The ``PostgresStore`` class implements the same ``QueryStore`` protocol as
-``InMemoryStore``, making it a drop-in replacement.
+The ``PostgresConversationStore`` class implements the same ``ConversationStore``
+protocol as ``InMemoryConversationStore``, making it a drop-in replacement.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
 
-from common.schemas import ActivityEvent, Message, QueryResponse, RequestStatus
+from common.schemas import ActivityEvent, Conversation, ConversationStatus, Message
 
 _COLUMNS = (
-    "request_id, approval_id, status, query, result, review_verdict, messages, events, created_at"
+    "id, title, status, approval_id, review_verdict, review_recommended_reject,"
+    " pending_query, messages, events, created_at, updated_at"
 )
 
 _CREATE_TABLE = """\
-CREATE TABLE IF NOT EXISTS queries (
-    request_id     TEXT PRIMARY KEY,
-    approval_id    TEXT UNIQUE,
-    status         TEXT NOT NULL,
-    query          TEXT NOT NULL DEFAULT '',
-    result         TEXT,
-    review_verdict TEXT,
-    messages       JSONB NOT NULL DEFAULT '[]'::jsonb,
-    events         JSONB NOT NULL DEFAULT '[]'::jsonb,
-    created_at     TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS conversations (
+    id                         TEXT PRIMARY KEY,
+    title                      TEXT NOT NULL DEFAULT '',
+    status                     TEXT NOT NULL DEFAULT 'active',
+    approval_id                TEXT,
+    review_verdict             TEXT,
+    review_recommended_reject  BOOLEAN NOT NULL DEFAULT FALSE,
+    pending_query              TEXT,
+    messages                   JSONB NOT NULL DEFAULT '[]'::jsonb,
+    events                     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at                 TEXT NOT NULL,
+    updated_at                 TEXT NOT NULL
 );
 """
 
-_UPSERT = f"""\
-INSERT INTO queries ({_COLUMNS})
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (request_id) DO UPDATE SET
-    approval_id    = EXCLUDED.approval_id,
-    status         = EXCLUDED.status,
-    query          = EXCLUDED.query,
-    result         = EXCLUDED.result,
-    review_verdict = EXCLUDED.review_verdict,
-    messages       = EXCLUDED.messages,
-    events         = EXCLUDED.events,
-    created_at     = EXCLUDED.created_at
+_INSERT = f"""\
+INSERT INTO conversations ({_COLUMNS})
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
 def _get_conn():
     url = os.environ.get("DATABASE_URL")
     if not url:
-        raise ValueError("DATABASE_URL environment variable is required for PostgresStore")
+        raise ValueError(
+            "DATABASE_URL environment variable is required for PostgresConversationStore"
+        )
     return psycopg2.connect(url)
 
 
@@ -61,118 +60,111 @@ def _dict_cursor():
     return {"cursor_factory": psycopg2.extras.RealDictCursor}
 
 
-def _row_to_response(row: dict) -> QueryResponse:
+def _row_to_conversation(row: dict) -> Conversation:
     messages = [Message(**m) for m in (row.get("messages") or [])]
-    events = [ActivityEvent(**e) for e in (row["events"] or [])]
-    return QueryResponse(
-        request_id=row["request_id"],
+    events = [ActivityEvent(**e) for e in (row.get("events") or [])]
+    return Conversation(
+        id=row["id"],
+        title=row["title"],
+        status=ConversationStatus(row["status"]),
         approval_id=row.get("approval_id"),
-        status=RequestStatus(row["status"]),
-        query=row["query"],
-        result=row.get("result"),
         review_verdict=row.get("review_verdict"),
+        review_recommended_reject=row.get("review_recommended_reject", False),
+        pending_query=row.get("pending_query"),
         messages=messages,
         events=events,
         created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 
-class PostgresStore:
-    """PostgreSQL implementation of :class:`store.QueryStore`."""
+class PostgresConversationStore:
+    """PostgreSQL implementation of :class:`store.ConversationStore`."""
 
     def __init__(self) -> None:
         with _get_conn() as conn, conn.cursor() as cur:
             cur.execute(_CREATE_TABLE)
             conn.commit()
 
-    def save(self, record: QueryResponse) -> None:
+    def create(self, conversation: Conversation) -> None:
         with _get_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                _UPSERT,
+                _INSERT,
                 (
-                    record.request_id,
-                    record.approval_id,
-                    record.status.value,
-                    record.query,
-                    record.result,
-                    record.review_verdict,
-                    json.dumps([m.model_dump() for m in record.messages]),
-                    json.dumps([e.model_dump() for e in record.events]),
-                    record.created_at,
+                    conversation.id,
+                    conversation.title,
+                    conversation.status.value,
+                    conversation.approval_id,
+                    conversation.review_verdict,
+                    conversation.review_recommended_reject,
+                    conversation.pending_query,
+                    json.dumps([m.model_dump() for m in conversation.messages]),
+                    json.dumps([e.model_dump() for e in conversation.events]),
+                    conversation.created_at,
+                    conversation.updated_at,
                 ),
             )
             conn.commit()
 
-    def get(self, request_id: str) -> QueryResponse | None:
+    def get(self, conversation_id: str) -> Conversation | None:
         with _get_conn() as conn, conn.cursor(**_dict_cursor()) as cur:
-            cur.execute(
-                "SELECT * FROM queries WHERE request_id = %s",
-                (request_id,),
-            )
+            cur.execute("SELECT * FROM conversations WHERE id = %s", (conversation_id,))
             row = cur.fetchone()
-        return _row_to_response(row) if row else None
+        return _row_to_conversation(row) if row else None
 
-    def get_by_approval_id(self, approval_id: str) -> QueryResponse | None:
+    def list_all(self) -> list[Conversation]:
         with _get_conn() as conn, conn.cursor(**_dict_cursor()) as cur:
-            cur.execute(
-                "SELECT * FROM queries WHERE approval_id = %s",
-                (approval_id,),
-            )
-            row = cur.fetchone()
-        return _row_to_response(row) if row else None
-
-    def list_all(self) -> list[QueryResponse]:
-        with _get_conn() as conn, conn.cursor(**_dict_cursor()) as cur:
-            cur.execute("SELECT * FROM queries ORDER BY created_at DESC")
+            cur.execute("SELECT * FROM conversations ORDER BY updated_at DESC")
             rows = cur.fetchall()
-        return [_row_to_response(r) for r in rows]
+        return [_row_to_conversation(r) for r in rows]
 
-    def add_event(self, request_id: str, event: ActivityEvent) -> None:
+    def add_message(self, conversation_id: str, message: Message) -> None:
+        now = datetime.now(UTC).isoformat()
         with _get_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                """UPDATE queries
+                """UPDATE conversations
+                   SET messages = messages || %s::jsonb,
+                       updated_at = %s
+                   WHERE id = %s""",
+                (json.dumps([message.model_dump()]), now, conversation_id),
+            )
+            conn.commit()
+
+    def add_event(self, conversation_id: str, event: ActivityEvent) -> None:
+        with _get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """UPDATE conversations
                    SET events = events || %s::jsonb
-                   WHERE request_id = %s""",
-                (json.dumps([event.model_dump()]), request_id),
+                   WHERE id = %s""",
+                (json.dumps([event.model_dump()]), conversation_id),
             )
             conn.commit()
 
-    def add_message(self, request_id: str, message: Message) -> None:
-        with _get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                """UPDATE queries
-                   SET messages = messages || %s::jsonb
-                   WHERE request_id = %s""",
-                (json.dumps([message.model_dump()]), request_id),
-            )
-            conn.commit()
+    def update(self, conversation_id: str, **fields: Any) -> Conversation | None:
+        if not fields:
+            return self.get(conversation_id)
 
-    def update_status(
-        self,
-        request_id: str,
-        status: RequestStatus,
-        result: str | None = None,
-        review_verdict: str | None = None,
-        approval_id: str | None = None,
-    ) -> QueryResponse | None:
-        sets = ["status = %s"]
-        params: list = [status.value]
-        if result is not None:
-            sets.append("result = %s")
-            params.append(result)
-        if review_verdict is not None:
-            sets.append("review_verdict = %s")
-            params.append(review_verdict)
-        if approval_id is not None:
-            sets.append("approval_id = %s")
-            params.append(approval_id)
-        params.append(request_id)
+        fields["updated_at"] = datetime.now(UTC).isoformat()
+
+        sets = []
+        params: list = []
+        for key, value in fields.items():
+            if key == "status" and isinstance(value, ConversationStatus):
+                value = value.value
+            sets.append(f"{key} = %s")
+            params.append(value)
+        params.append(conversation_id)
 
         with _get_conn() as conn, conn.cursor(**_dict_cursor()) as cur:
             cur.execute(
-                f"UPDATE queries SET {', '.join(sets)} WHERE request_id = %s RETURNING *",
+                f"UPDATE conversations SET {', '.join(sets)} WHERE id = %s RETURNING *",
                 params,
             )
             row = cur.fetchone()
             conn.commit()
-        return _row_to_response(row) if row else None
+        return _row_to_conversation(row) if row else None
+
+    def delete(self, conversation_id: str) -> None:
+        with _get_conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM conversations WHERE id = %s", (conversation_id,))
+            conn.commit()
