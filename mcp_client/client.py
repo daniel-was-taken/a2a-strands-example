@@ -60,9 +60,7 @@ class ReconnectingMCPClient(MCPClient):
         """Call a tool, reconnecting first if the session is dead."""
         if not self._is_session_active():
             self._reconnect()
-        return await super().call_tool_async(
-            tool_use_id, name, arguments, read_timeout_seconds
-        )
+        return await super().call_tool_async(tool_use_id, name, arguments, read_timeout_seconds)
 
 
 def create_mcp_client(mcp_url: str, auth: dict | None = None) -> ReconnectingMCPClient:

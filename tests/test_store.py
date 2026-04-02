@@ -19,12 +19,8 @@ def test_get_missing_returns_none():
 
 def test_list_all_ordered_by_updated_at():
     store = InMemoryConversationStore()
-    c1 = Conversation(
-        id="c1", title="First", updated_at="2024-01-01T00:00:00"
-    )
-    c2 = Conversation(
-        id="c2", title="Second", updated_at="2024-01-02T00:00:00"
-    )
+    c1 = Conversation(id="c1", title="First", updated_at="2024-01-01T00:00:00")
+    c2 = Conversation(id="c2", title="Second", updated_at="2024-01-02T00:00:00")
     store.create(c1)
     store.create(c2)
     result = store.list_all()
@@ -62,9 +58,7 @@ def test_add_event():
 def test_update():
     store = InMemoryConversationStore()
     store.create(Conversation(id="c1", title="T"))
-    result = store.update(
-        "c1", title="New Title", status=ConversationStatus.AWAITING_APPROVAL
-    )
+    result = store.update("c1", title="New Title", status=ConversationStatus.AWAITING_APPROVAL)
     assert result is not None
     assert result.title == "New Title"
     assert result.status == ConversationStatus.AWAITING_APPROVAL

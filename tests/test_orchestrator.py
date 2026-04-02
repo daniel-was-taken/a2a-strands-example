@@ -68,9 +68,7 @@ def test_send_message(client):
     """Non-destructive message should get an agent response."""
     create_resp = client.post("/conversations")
     conv_id = create_resp.json()["id"]
-    resp = client.post(
-        f"/conversations/{conv_id}/messages", json={"content": "Show all tables"}
-    )
+    resp = client.post(f"/conversations/{conv_id}/messages", json={"content": "Show all tables"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "active"
@@ -105,9 +103,7 @@ def test_send_message_title_truncated(client):
 
 
 def test_send_message_not_found(client):
-    resp = client.post(
-        "/conversations/nonexistent/messages", json={"content": "hello"}
-    )
+    resp = client.post("/conversations/nonexistent/messages", json={"content": "hello"})
     assert resp.status_code == 404
 
 
@@ -126,9 +122,7 @@ def test_send_message_to_awaiting_returns_409(client_approve):
         f"/conversations/{conv_id}/messages",
         json={"content": "delete from users where id = 5"},
     )
-    resp = client_approve.post(
-        f"/conversations/{conv_id}/messages", json={"content": "hello"}
-    )
+    resp = client_approve.post(f"/conversations/{conv_id}/messages", json={"content": "hello"})
     assert resp.status_code == 409
 
 
@@ -136,12 +130,8 @@ def test_multi_turn_conversation(client):
     """Multiple messages should accumulate in the thread."""
     create_resp = client.post("/conversations")
     conv_id = create_resp.json()["id"]
-    client.post(
-        f"/conversations/{conv_id}/messages", json={"content": "Show all tables"}
-    )
-    resp = client.post(
-        f"/conversations/{conv_id}/messages", json={"content": "How many rows?"}
-    )
+    client.post(f"/conversations/{conv_id}/messages", json={"content": "Show all tables"})
+    resp = client.post(f"/conversations/{conv_id}/messages", json={"content": "How many rows?"})
     data = resp.json()
     assert len(data["messages"]) == 4  # 2 per turn
 
@@ -151,16 +141,12 @@ def test_agent_context_isolation(client):
     # Conversation A
     create_a = client.post("/conversations")
     conv_a_id = create_a.json()["id"]
-    client.post(
-        f"/conversations/{conv_a_id}/messages", json={"content": "Show all tables"}
-    )
+    client.post(f"/conversations/{conv_a_id}/messages", json={"content": "Show all tables"})
 
     # Conversation B
     create_b = client.post("/conversations")
     conv_b_id = create_b.json()["id"]
-    resp = client.post(
-        f"/conversations/{conv_b_id}/messages", json={"content": "Count employees"}
-    )
+    resp = client.post(f"/conversations/{conv_b_id}/messages", json={"content": "Count employees"})
 
     # Conv B should only have its own messages
     data = resp.json()
@@ -259,9 +245,7 @@ def test_message_has_events(client):
     """Processed message should have activity events."""
     create_resp = client.post("/conversations")
     conv_id = create_resp.json()["id"]
-    client.post(
-        f"/conversations/{conv_id}/messages", json={"content": "Show all tables"}
-    )
+    client.post(f"/conversations/{conv_id}/messages", json={"content": "Show all tables"})
     resp = client.get(f"/conversations/{conv_id}")
     events = resp.json()["events"]
     assert len(events) >= 2

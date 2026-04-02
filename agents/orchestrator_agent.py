@@ -258,9 +258,7 @@ async def _execute_message(conversation_id: str) -> Conversation:
             )
 
         _add_event(conversation_id, "orchestrator", "completed", "Message processed successfully")
-        conversation_store.add_message(
-            conversation_id, Message(role="agent", content=response)
-        )
+        conversation_store.add_message(conversation_id, Message(role="agent", content=response))
         return conversation_store.get(conversation_id)  # type: ignore[return-value]
     except Exception:
         logger.exception("Message execution failed for conversation %s", conversation_id)
