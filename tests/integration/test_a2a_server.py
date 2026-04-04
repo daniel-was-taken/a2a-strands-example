@@ -28,16 +28,16 @@ def a2a_app(mock_env):
     mock_client = MagicMock()
 
     with (
-        patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.create_mcp_client", return_value=mock_client),
-        patch("common.logging_setup.configure_logging"),
-        patch("common.tracing.configure_tracing"),
+        patch("core.model.create_model", return_value=mock_model),
+        patch("core.mcp.create_mcp_client", return_value=mock_client),
+        patch("core.logging.configure_logging"),
+        patch("core.tracing.configure_tracing"),
     ):
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
 
-        from agents.mcp_agent import create_mcp_agent
-        from common.task_store import InMemoryA2ATaskStore
+        from core.server import create_mcp_agent
+        from core.task_store import InMemoryA2ATaskStore
 
         agent_config = {
             "name": "Test Agent",
@@ -98,15 +98,15 @@ async def test_auth_middleware_blocks_without_key():
     mock_client = MagicMock()
 
     with (
-        patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.create_mcp_client", return_value=mock_client),
+        patch("core.model.create_model", return_value=mock_model),
+        patch("core.mcp.create_mcp_client", return_value=mock_client),
     ):
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
 
-        from agents.mcp_agent import create_mcp_agent
-        from common.auth import AgentAuthMiddleware
-        from common.task_store import InMemoryA2ATaskStore
+        from core.server import create_mcp_agent
+        from core.auth import AgentAuthMiddleware
+        from core.task_store import InMemoryA2ATaskStore
 
         agent = create_mcp_agent(
             {
@@ -141,15 +141,15 @@ async def test_auth_middleware_allows_agent_card_without_key():
     mock_client = MagicMock()
 
     with (
-        patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.create_mcp_client", return_value=mock_client),
+        patch("core.model.create_model", return_value=mock_model),
+        patch("core.mcp.create_mcp_client", return_value=mock_client),
     ):
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
 
-        from agents.mcp_agent import create_mcp_agent
-        from common.auth import AgentAuthMiddleware
-        from common.task_store import InMemoryA2ATaskStore
+        from core.server import create_mcp_agent
+        from core.auth import AgentAuthMiddleware
+        from core.task_store import InMemoryA2ATaskStore
 
         agent = create_mcp_agent(
             {

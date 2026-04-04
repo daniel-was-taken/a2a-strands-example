@@ -1,7 +1,7 @@
 """Tests for the InMemoryConversationStore."""
 
-from common.schemas import ActivityEvent, Conversation, ConversationStatus, Message
-from common.store import InMemoryConversationStore
+from core.schemas import ActivityEvent, Conversation, ConversationStatus, Message
+from core.store import InMemoryConversationStore
 
 
 def test_create_and_get():

@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from common.schemas import (
+from core.schemas import (
     ActivityEvent,
     Conversation,
     ConversationStatus,

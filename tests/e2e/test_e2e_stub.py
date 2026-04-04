@@ -41,7 +41,7 @@ async def test_db_agent_card_reachable():
     """Database Reader AgentCard should be reachable."""
     import httpx
 
-    db_agent_url = os.environ.get("DB_READER_URL", "http://localhost:8001/")
+    db_agent_url = os.environ.get("DB_AGENT_URL", "http://localhost:8001/")
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{db_agent_url.rstrip('/')}/.well-known/agent-card.json",
@@ -49,7 +49,7 @@ async def test_db_agent_card_reachable():
         )
     assert resp.status_code == 200
     card = resp.json()
-    assert card["name"] == "Database Reader"
+    assert card["name"] == "Database Agent"
 
 
 @pytest.mark.asyncio
@@ -65,7 +65,7 @@ async def test_graph_agent_card_reachable():
         )
     assert resp.status_code == 200
     card = resp.json()
-    assert card["name"] == "Graph Agent"
+    assert card["name"] == "Graph Reviewer"
 
 
 @pytest.mark.asyncio

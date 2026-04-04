@@ -1,4 +1,4 @@
-"""Unit tests for the common/ module (config, auth, task_store, logging)."""
+"""Unit tests for the core/ module (config, auth, task_store, logging)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-# ── common.task_store ─────────────────────────────────────────────────────────
+# ── core.task_store ─────────────────────────────────────────────────────────
 
 
 class TestInMemoryA2ATaskStore:
@@ -21,7 +21,7 @@ class TestInMemoryA2ATaskStore:
         )
 
     async def test_save_and_get(self):
-        from common.task_store import InMemoryA2ATaskStore
+        from core.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
         task = self._make_task("t1")
@@ -30,13 +30,13 @@ class TestInMemoryA2ATaskStore:
         assert (await store.get("t1")).id == "t1"
 
     async def test_get_missing_returns_none(self):
-        from common.task_store import InMemoryA2ATaskStore
+        from core.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
         assert await store.get("nonexistent") is None
 
     async def test_delete_removes_task(self):
-        from common.task_store import InMemoryA2ATaskStore
+        from core.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
         task = self._make_task("t2")
@@ -45,7 +45,7 @@ class TestInMemoryA2ATaskStore:
         assert await store.get("t2") is None
 
     async def test_delete_nonexistent_does_not_raise(self):
-        from common.task_store import InMemoryA2ATaskStore
+        from core.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
         await store.delete("nonexistent")  # Should not raise
@@ -54,7 +54,7 @@ class TestInMemoryA2ATaskStore:
         """Concurrent saves from multiple threads must not corrupt state."""
         import asyncio
 
-        from common.task_store import InMemoryA2ATaskStore
+        from core.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
 
@@ -68,12 +68,12 @@ class TestInMemoryA2ATaskStore:
         assert len(store._tasks) == 200  # 4 coroutines × 50 tasks
 
 
-# ── common.logging_setup ──────────────────────────────────────────────────────
+# ── core.logging_setup ──────────────────────────────────────────────────────
 
 
 class TestStructuredJsonFormatter:
     def test_output_is_valid_json(self):
-        from common.logging_setup import StructuredJsonFormatter
+        from core.logging import StructuredJsonFormatter
 
         formatter = StructuredJsonFormatter(agent_name="test-agent")
         record = logging.LogRecord(
@@ -92,7 +92,7 @@ class TestStructuredJsonFormatter:
         assert parsed["agent_name"] == "test-agent"
 
     def test_empty_fields_omitted(self):
-        from common.logging_setup import StructuredJsonFormatter
+        from core.logging import StructuredJsonFormatter
 
         formatter = StructuredJsonFormatter(agent_name="")
         record = logging.LogRecord(
@@ -111,7 +111,7 @@ class TestStructuredJsonFormatter:
         assert "session_id" not in parsed
 
     def test_extra_fields_included(self):
-        from common.logging_setup import StructuredJsonFormatter
+        from core.logging import StructuredJsonFormatter
 
         formatter = StructuredJsonFormatter()
         record = logging.LogRecord(
@@ -133,7 +133,7 @@ class TestStructuredJsonFormatter:
         assert parsed["duration_ms"] == 42
 
 
-# ── common.auth ───────────────────────────────────────────────────────────────
+# ── core.auth ───────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
@@ -144,7 +144,7 @@ async def test_auth_middleware_passthrough_when_no_key():
     from starlette.routing import Route
     from starlette.testclient import TestClient
 
-    from common.auth import AgentAuthMiddleware
+    from core.auth import AgentAuthMiddleware
 
     def homepage(request):
         return PlainTextResponse("ok")
@@ -164,7 +164,7 @@ async def test_auth_middleware_rejects_missing_key():
     from starlette.routing import Route
     from starlette.testclient import TestClient
 
-    from common.auth import AgentAuthMiddleware
+    from core.auth import AgentAuthMiddleware
 
     def homepage(request):
         return PlainTextResponse("ok")
@@ -184,7 +184,7 @@ async def test_auth_middleware_accepts_correct_key():
     from starlette.routing import Route
     from starlette.testclient import TestClient
 
-    from common.auth import AgentAuthMiddleware
+    from core.auth import AgentAuthMiddleware
 
     def homepage(request):
         return PlainTextResponse("ok")
@@ -205,7 +205,7 @@ async def test_auth_middleware_exempts_agent_card():
     from starlette.routing import Route
     from starlette.testclient import TestClient
 
-    from common.auth import AgentAuthMiddleware
+    from core.auth import AgentAuthMiddleware
 
     def card(request):
         return PlainTextResponse("{}")

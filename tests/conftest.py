@@ -59,7 +59,7 @@ def _mock_env(monkeypatch):
 @pytest.fixture(autouse=True)
 def _clear_store():
     """Reset the in-memory store between tests."""
-    from common.store import conversation_store
+    from core.store import conversation_store
 
     conversation_store._conversations.clear()
 
@@ -67,7 +67,7 @@ def _clear_store():
 @pytest.fixture(autouse=True)
 def _reset_agent():
     """Reset the lazy-loaded agent singleton between tests."""
-    import agents.orchestrator_agent as orch
+    import core.orchestrator as orch
 
     orch._agent = None
     yield
@@ -83,14 +83,14 @@ def _make_mock_agents(review_return):
 
     return (
         mock_agent,
-        patch("agents.model.create_model", return_value=mock_model),
-        patch("agents.mcp_agent.create_mcp_agent", return_value=mock_agent),
+        patch("core.model.create_model", return_value=mock_model),
+        patch("core.server.create_mcp_agent", return_value=mock_agent),
         patch(
-            "agents.orchestrator_agent.create_safety_reviewer",
+            "core.orchestrator.create_safety_reviewer",
             return_value=mock_agent,
         ),
         patch(
-            "agents.orchestrator_agent.review_delete_request",
+            "core.orchestrator.review_delete_request",
             return_value=review_return,
         ),
     )
@@ -115,7 +115,7 @@ def mock_agents_approve():
 @pytest.fixture()
 def client(mock_agents):
     """TestClient with fully mocked backend (safety reviewer rejects)."""
-    from agents.orchestrator_agent import app
+    from core.orchestrator import app
 
     yield TestClient(app)
 
@@ -123,6 +123,6 @@ def client(mock_agents):
 @pytest.fixture()
 def client_approve(mock_agents_approve):
     """TestClient with fully mocked backend (safety reviewer approves)."""
-    from agents.orchestrator_agent import app
+    from core.orchestrator import app
 
     yield TestClient(app)

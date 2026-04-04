@@ -29,16 +29,16 @@ def agent_app(mock_env):
     mock_mcp = MagicMock()
 
     with (
-        patch("agents.model.create_model", return_value=mock_model),
-        patch("mcp_client.client.create_mcp_client", return_value=mock_mcp),
-        patch("common.logging_setup.configure_logging"),
-        patch("common.tracing.configure_tracing"),
+        patch("core.model.create_model", return_value=mock_model),
+        patch("core.mcp.create_mcp_client", return_value=mock_mcp),
+        patch("core.logging.configure_logging"),
+        patch("core.tracing.configure_tracing"),
     ):
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
 
-        from agents.mcp_agent import create_mcp_agent
-        from common.task_store import InMemoryA2ATaskStore
+        from core.server import create_mcp_agent
+        from core.task_store import InMemoryA2ATaskStore
 
         agent_config = {
             "name": "Test Agent",
