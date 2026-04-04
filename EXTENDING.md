@@ -12,12 +12,14 @@ framework code.
 1. [Architecture Overview](#architecture-overview)
 2. [Adding a New MCP Agent](#adding-a-new-mcp-agent)
 3. [Adding a Custom Agent](#adding-a-custom-agent)
-4. [Changing the LLM Provider](#changing-the-llm-provider)
-5. [Changing the MCP Backend](#changing-the-mcp-backend)
-6. [Customizing Safety Rules](#customizing-safety-rules)
-7. [Adapting to a Different Domain](#adapting-to-a-different-domain)
-8. [Frontend Customization](#frontend-customization)
-9. [Production Deployment Notes](#production-deployment-notes)
+4. [Graph Pattern](#graph-pattern)
+5. [Swarm Pattern](#swarm-pattern)
+6. [Changing the LLM Provider](#changing-the-llm-provider)
+7. [Changing the MCP Backend](#changing-the-mcp-backend)
+8. [Customizing Safety Rules](#customizing-safety-rules)
+9. [Adapting to a Different Domain](#adapting-to-a-different-domain)
+10. [Frontend Customization](#frontend-customization)
+11. [Production Deployment Notes](#production-deployment-notes)
 
 ---
 
@@ -43,11 +45,12 @@ framework code.
                           ┌────────────▼─────────────────────┐
                           │    Agents (from agents.yaml)      │
                           │                                   │
-                          │  MCP Agents:                      │
+                          │  MCP Agents (port 8001+):         │
                           │  • Config-driven (any MCP server) │
                           │                                   │
                           │  Custom Agents:                   │
-                          │  • Python factory (e.g. Graph)    │
+                          │  • Graph Reviewer (port 8002)     │
+                          │  • Research Team  (port 8003)     │
                           └────────────┬─────────────────────┘
                                        │ MCP Protocol
                           ┌────────────▼─────────────────────┐
@@ -56,16 +59,18 @@ framework code.
                           └──────────────────────────────────┘
 ```
 
+The codebase has a clear boundary: **`core/`** is the framework (don't modify when forking), **`agents/`** is user agents (fork and customize).
+
 **Key concepts:**
 
 | Concept | What it is | Where it lives |
 |---------|-----------|----------------|
 | **Agent** | A Strands `Agent` with a system prompt and tools. Exposed as an A2A server via `serve_agent()`. | `agents/` |
-| **MCP Agent** | Config-driven agent created from `agents.yaml`. No Python code needed. | `agents/mcp_agent.py` |
-| **Custom Agent** | Python-defined agent with a factory function (e.g. Graph Agent). | `agents/*.py` |
-| **Conversation** | A persistent chat thread with messages, events, and approval state. | `common/schemas.py` |
-| **ConversationStore** | Protocol for persisting conversations. In-memory by default, swappable to Postgres. | `common/store.py` |
-| **MCP Client** | Connects an agent to an external service via Model Context Protocol. | `mcp_client/` |
+| **MCP Agent** | Config-driven agent created from `agents.yaml`. No Python code needed. | `core/server.py` (`create_mcp_agent`) |
+| **Custom Agent** | Python-defined agent with a factory function (e.g. Graph Reviewer, Research Team). | `agents/*.py` |
+| **Conversation** | A persistent chat thread with messages, events, and approval state. | `core/schemas.py` |
+| **ConversationStore** | Protocol for persisting conversations. In-memory by default, swappable to Postgres. | `core/store.py` |
+| **MCP Client** | Connects an agent to an external service via Model Context Protocol. | `core/mcp.py` |
 
 ---
 
@@ -81,7 +86,7 @@ The simplest way to add a new agent — no Python code required.
 agents:
   - name: Analytics Agent
     type: mcp
-    port: 8003
+    port: 8004
     description: Handles data analysis and reporting queries
     mcp_url: https://your-mcp-server.example.com/mcp
     auth:
@@ -147,8 +152,8 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamable_http_client
 
-from agents.model import create_model
-from common.server import serve_agent
+from core.model import create_model
+from core.server import serve_agent
 
 
 def create_my_agent() -> Agent:
@@ -168,7 +173,7 @@ def create_my_agent() -> Agent:
 
 def serve():
     agent = create_my_agent()
-    serve_agent(agent, name="my-agent", port=8003)
+    serve_agent(agent, name="my-agent", port=8004)
 
 
 if __name__ == "__main__":
@@ -183,7 +188,7 @@ if __name__ == "__main__":
 agents:
   - name: My Agent
     type: custom
-    port: 8003
+    port: 8004
     description: Handles requests for my service
     module: agents.my_agent
     factory: serve
@@ -209,14 +214,85 @@ my-agent:
   command: ["python", "-m", "agents.my_agent"]
   env_file: .env
   ports:
-    - "8003:8003"
+    - "8004:8004"
 ```
+
+---
+
+## Graph Pattern
+
+Use Strands `GraphBuilder` when your agent needs a multi-step workflow with
+conditional branching (e.g. analyze → implement → review with retry loops).
+
+See `agents/graph_reviewer.py` for the full example. Key structure:
+
+```python
+# agents/graph_reviewer.py
+from strands.multiagent.graph import GraphBuilder
+from core.model import create_model
+from core.server import serve_agent
+
+def create_graph_agent():
+    graph = (
+        GraphBuilder()
+        .add_node("analyze",    analyze_agent)
+        .add_node("implement",  implement_agent)
+        .add_node("review",     review_agent)
+        .add_edge("analyze",    "implement")
+        .add_conditional_edge(
+            "review",
+            lambda result: "implement" if "needs revision" in result else END,
+            max_iterations=5,
+        )
+        .set_entry_point("analyze")
+        .build()
+    )
+    return graph
+
+def serve():
+    serve_agent(create_graph_agent(), name="graph-reviewer", port=8002)
+```
+
+Register in `agents.yaml` as `type: custom` with `module: agents.graph_reviewer` and `factory: serve`.
+
+Also see `examples/a2a_graph.py` for a standalone demo.
+
+---
+
+## Swarm Pattern
+
+Use the Swarm pattern when you want autonomous agent handoffs — agents
+transfer control to each other based on context, without a fixed workflow.
+
+See `agents/research_team.py` for the full example. Key structure:
+
+```python
+# agents/research_team.py
+from strands.multiagent.swarm import Swarm
+from core.model import create_model
+from core.server import serve_agent
+
+def create_research_team():
+    researcher = Agent(model=create_model(), name="Researcher", ...)
+    analyst    = Agent(model=create_model(), name="Analyst", ...)
+    writer     = Agent(model=create_model(), name="Writer", ...)
+
+    swarm = Swarm(agents=[researcher, analyst, writer])
+    return swarm
+
+def serve():
+    serve_agent(create_research_team(), name="research-team", port=8003)
+```
+
+Register in `agents.yaml` as `type: custom` with `module: agents.research_team` and `factory: serve`.
+
+Also see `examples/a2a_swarm.py` for a standalone demo.
 
 ---
 
 ## Changing the LLM Provider
 
-The LLM configuration is centralized in `agents/model.py`. All agents call
+The LLM configuration is centralized in `core/model.py`. All agents call
 `create_model()` and receive the same model instance.
 
 ### Switching to a different Gemini model
@@ -232,7 +308,7 @@ GEMINI_MODEL_ID=gemini-2.5-pro
 The Strands SDK supports multiple model providers. Replace the model factory:
 
 ```python
-# agents/model.py
+# core/model.py
 import os
 from strands.models.anthropic import AnthropicModel
 
@@ -312,7 +388,7 @@ def create_local_mcp_client() -> MCPClient:
 
 ### Modifying the keyword filter
 
-In `agents/orchestrator_agent.py`:
+In `core/orchestrator.py`:
 
 ```python
 DESTRUCTIVE_KEYWORDS = {"delete", "remove", "drop", "truncate", "destroy", "update", "alter"}
@@ -320,7 +396,7 @@ DESTRUCTIVE_KEYWORDS = {"delete", "remove", "drop", "truncate", "destroy", "upda
 
 ### Changing the safety review logic
 
-The safety reviewer is in `tools/safety_reviewer.py`. Edit the system prompt
+The safety reviewer is in `core/safety.py`. Edit the system prompt
 to change approval criteria:
 
 ```python
@@ -462,7 +538,9 @@ docker compose up --build
 
 Services defined in `docker-compose.yml`:
 - **orchestrator** on port 8000 (includes the frontend at `/`)
-- **specialist agents** on their configured ports (from `agents.yaml`)
+- **database-agent** on port 8001
+- **graph-reviewer** on port 8002
+- **research-team** on port 8003
 
 ### GCP Cloud Run + Terraform
 
@@ -504,7 +582,7 @@ class FirestoreStore:
     # ... implement remaining methods (list_all, add_message, add_event, update, delete)
 ```
 
-Then register it in `common/store.py`:
+Then register it in `core/store.py`:
 
 ```python
 def _create_store() -> ConversationStore:

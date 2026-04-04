@@ -12,11 +12,12 @@ A production-ready [Agent-to-Agent (A2A)](https://github.com/google/a2a-spec) mu
 User -> Orchestrator (FastAPI :8000)
             |
             +-- A2A --> [Agents declared in agents.yaml]
-                        ├── MCP Agent (config-driven, any MCP server)
-                        └── Custom Agent (Python factory, e.g. Graph Agent)
+                        ├── Database Agent  (MCP, port 8001)
+                        ├── Graph Reviewer  (custom, port 8002)
+                        └── Research Team   (custom, port 8003)
 ```
 
-Agents are declared in `agents.yaml` and spun up dynamically — no Python code changes needed to add a new MCP-backed agent. The orchestrator discovers agents via `A2AClientToolProvider` and routes queries based on intent. Each specialist agent runs as an independent A2A server.
+The codebase has a clear boundary: **`core/`** is the framework (logging, auth, serving, MCP client, safety review — don't modify), **`agents/`** is user agents (fork and customize). Agents are declared in `agents.yaml` and spun up dynamically — no Python code changes needed to add a new MCP-backed agent. The orchestrator discovers agents via `A2AClientToolProvider` and routes queries based on intent. Each specialist agent runs as an independent A2A server.
 
 ### Two Operating Modes
 
@@ -100,9 +101,16 @@ curl http://localhost:8000/health
 
 ## Adding a New Agent
 
-The project is designed so that anyone can add a new A2A agent with minimal boilerplate. The `serve_agent()` helper in `common/server.py` handles all the server infrastructure (logging, tracing, A2A protocol, auth middleware, CORS).
+The project is designed so that anyone can add a new A2A agent with minimal boilerplate. The `serve_agent()` helper in `core/server.py` handles all the server infrastructure (logging, tracing, A2A protocol, auth middleware, CORS).
 
-### Minimal example
+Four patterns are available:
+
+1. **MCP** — YAML-only config in `agents.yaml`, no Python needed
+2. **Graph** — GraphBuilder workflow (see `agents/graph_reviewer.py`)
+3. **Swarm** — Autonomous handoffs (see `agents/research_team.py`)
+4. **Pipeline** — Graph with remote A2AAgent nodes (see `examples/pipeline_agent.py`)
+
+### Minimal custom agent example
 
 ```python
 # agents/my_agent.py
@@ -110,8 +118,8 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 from mcp.client.streamable_http import streamable_http_client
 
-from agents.model import create_model
-from common.server import serve_agent
+from core.model import create_model
+from core.server import serve_agent
 
 
 def create_my_agent() -> Agent:
@@ -131,7 +139,7 @@ def create_my_agent() -> Agent:
 
 def serve():
     agent = create_my_agent()
-    serve_agent(agent, name="my-agent", port=8003)
+    serve_agent(agent, name="my-agent", port=8004)
 
 
 if __name__ == "__main__":
@@ -147,7 +155,7 @@ if __name__ == "__main__":
    agents:
      - name: My Agent
        type: custom
-       port: 8003
+       port: 8004
        description: Handles requests for my service
        module: agents.my_agent
        factory: serve
@@ -180,26 +188,29 @@ a2a-strands-example/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
-├── agents.yaml                      # Agent definitions (MCP and custom types)
-├── agents/
-│   ├── model.py                      # Shared Gemini model factory
-│   ├── orchestrator_agent.py         # Orchestrator (FastAPI, routes to agents)
-│   ├── mcp_agent.py                  # Generic MCP agent factory + CLI
-│   └── graph_agent.py               # Graph Agent (analyze -> implement -> review)
-├── common/
+├── agents.yaml                       # Agent definitions (MCP and custom types)
+├── core/                             # Framework — do not modify when forking
 │   ├── config.py                     # Pydantic Settings (all env vars)
-│   ├── server.py                     # serve_agent() helper for A2A servers
+│   ├── orchestrator.py               # Orchestrator (FastAPI, routes to agents)
+│   ├── server.py                     # serve_agent() + MCP agent factory + CLI
+│   ├── mcp.py                        # Generic MCP client factory + registry
+│   ├── model.py                      # Shared Gemini model factory
+│   ├── safety.py                     # LLM-based safety reviewer
 │   ├── schemas.py                    # Pydantic models (Conversation, Message, etc.)
 │   ├── store.py                      # ConversationStore protocol + InMemoryStore
 │   ├── auth.py                       # X-Agent-API-Key middleware
 │   ├── log_stream.py                 # SSE broadcaster
-│   ├── logging_setup.py              # Structured JSON logging
+│   ├── logging.py                    # Structured JSON logging
 │   ├── task_store.py                 # In-memory A2A TaskStore
 │   └── tracing.py                    # OpenTelemetry setup
-├── tools/
-│   └── safety_reviewer.py           # LLM-based safety reviewer
-├── mcp_client/
-│   └── client.py                     # Generic MCP client factory + registry
+├── agents/                           # User agents — fork and customize
+│   ├── graph_reviewer.py             # Graph Agent (analyze -> implement -> review)
+│   └── research_team.py              # Swarm Agent (autonomous handoffs)
+├── examples/                         # Standalone pattern demos
+│   ├── a2a_graph.py                  # A2A + graph pattern example
+│   ├── a2a_swarm.py                  # A2A + swarm pattern example
+│   ├── mcp_agent.py                  # Minimal MCP agent example
+│   └── pipeline_agent.py             # Graph with remote A2AAgent nodes
 ├── db/
 │   └── repository.py                 # PostgreSQL ConversationStore implementation
 ├── frontend/
@@ -217,9 +228,10 @@ a2a-strands-example/
     ├── test_orchestrator.py          # Conversation lifecycle tests
     ├── test_store.py                 # ConversationStore tests
     ├── unit/
-    │   ├── test_common.py            # Auth, task store, logging tests
+    │   ├── test_core.py              # Auth, task store, logging tests
     │   └── test_schemas.py           # Conversation data model tests
     ├── integration/
+    │   ├── test_mcp.py               # MCP agent + client tests
     │   ├── test_a2a_server.py        # A2A protocol tests
     │   └── test_agent_card.py        # AgentCard contract tests
     └── e2e/
@@ -257,7 +269,7 @@ ruff check --fix .
 ruff format .
 
 # Type checking
-mypy agents/ tools/ mcp_client/ common/ db/
+mypy core/ agents/ db/
 ```
 
 ## Docker
@@ -267,7 +279,7 @@ mypy agents/ tools/ mcp_client/ common/ db/
 docker compose up --build
 
 # Run a single agent
-docker compose up db-agent
+docker compose up database-agent
 ```
 
 ## Deployment
