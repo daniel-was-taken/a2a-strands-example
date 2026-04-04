@@ -7,7 +7,7 @@ required by the A2A production checklist.
 
 Usage::
 
-    from common.logging_setup import configure_logging
+    from core.logging import configure_logging
     configure_logging(agent_name="db-agent")
 """
 

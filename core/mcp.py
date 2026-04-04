@@ -6,7 +6,7 @@ when the underlying session dies (e.g. idle-timeout from the MCP server).
 
 Usage::
 
-    from mcp_client.client import create_mcp_client
+    from core.mcp import create_mcp_client
 
     client = create_mcp_client(
         "https://mcp.neon.tech/mcp",

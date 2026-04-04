@@ -10,7 +10,7 @@ To enable tracing in production:
 
 Usage::
 
-    from common.tracing import configure_tracing
+    from core.tracing import configure_tracing
     configure_tracing(service_name="db-agent")
 """
 
