@@ -32,7 +32,7 @@ docker compose up --build
 # Tests
 pytest                            # All tests
 pytest tests/test_smoke.py        # Single file
-pytest tests/test_orchestrator.py::test_submit_non_destructive_query  # Single test
+pytest tests/test_orchestrator.py::test_send_message  # Single test
 pytest -x                         # Stop on first failure
 
 # Lint & format
@@ -61,7 +61,7 @@ User → Orchestrator (8000) → A2A → [Agents declared in agents.yaml]
 
 ### Orchestrator (`agents/orchestrator_agent.py`)
 
-FastAPI app that receives user queries, runs safety review on destructive operations (DELETE/DROP/TRUNCATE), and routes to specialist agents. Manages query lifecycle with statuses: `PENDING_APPROVAL → COMPLETED | RECOMMENDED_REJECT | REJECTED | FAILED`. The agent singleton is lazy-loaded and thread-safe. Agent invocations use `asyncio.to_thread` to avoid blocking the event loop.
+FastAPI app with a conversation-first data model. Receives user messages via REST, runs safety review on destructive operations (DELETE/DROP/TRUNCATE), and routes to specialist agents. Each conversation is a persistent chat thread with statuses: `active` or `awaiting_approval`. The agent singleton is lazy-loaded and thread-safe; its `messages` array is reset before each turn to prevent cross-conversation leakage, with context rebuilt from the conversation's stored messages (last 20). Agent invocations use `asyncio.to_thread` to avoid blocking the event loop.
 
 ### MCP Agents (config-driven) (`agents/mcp_agent.py`)
 
@@ -89,8 +89,8 @@ LLM-based reviewer that evaluates destructive queries. Outputs `APPROVE: reason`
 
 - `config.py` — Pydantic Settings: single source of truth for all env vars. No longer has Neon/per-agent fields; includes `agents_config: str` pointing to the YAML agent definitions file
 - `server.py` — `serve_agent()` helper: starts any Strands agent as an A2A server with auth, CORS, structured logging, and tracing. All specialist agents use this instead of duplicating server boilerplate.
-- `schemas.py` — Pydantic request/response models (QueryResponse, Message, ActivityEvent, etc.)
-- `store.py` — QueryStore protocol + InMemoryStore (swap via `STORE_BACKEND` env var)
+- `schemas.py` — Pydantic models: `Conversation`, `ConversationStatus`, `ConversationSummary`, `MessageRequest`, `Message`, `ActivityEvent`, `ErrorResponse`, `HealthResponse`
+- `store.py` — `ConversationStore` protocol + `InMemoryConversationStore` (swap via `STORE_BACKEND` env var)
 - `log_stream.py` — SSE broadcaster for real-time log streaming
 - `auth.py` — `AgentAuthMiddleware`: X-Agent-API-Key validation on A2A agents (no-op when key is empty; always exempt: `/.well-known/agent-card.json`, `/health`, `/ready`)
 - `logging_setup.py` — Structured JSON logging with correlation fields

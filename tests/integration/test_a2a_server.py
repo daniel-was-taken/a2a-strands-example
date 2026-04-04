@@ -104,8 +104,8 @@ async def test_auth_middleware_blocks_without_key():
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
 
-        from core.server import create_mcp_agent
         from core.auth import AgentAuthMiddleware
+        from core.server import create_mcp_agent
         from core.task_store import InMemoryA2ATaskStore
 
         agent = create_mcp_agent(
@@ -147,8 +147,8 @@ async def test_auth_middleware_allows_agent_card_without_key():
         from a2a.types import AgentSkill
         from strands.multiagent.a2a import A2AServer
 
-        from core.server import create_mcp_agent
         from core.auth import AgentAuthMiddleware
+        from core.server import create_mcp_agent
         from core.task_store import InMemoryA2ATaskStore
 
         agent = create_mcp_agent(

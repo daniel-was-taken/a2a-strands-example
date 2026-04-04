@@ -1,7 +1,7 @@
-# Extending the A2A Database Orchestrator
+# Extending the A2A Multi-Agent System
 
 This guide explains how to add agents, tools, and customizations to the
-A2A Database Orchestrator. The system is designed around clear extension
+A2A multi-agent system. The system is designed around clear extension
 points so you can adapt it to different domains without changing the core
 framework code.
 
@@ -10,10 +10,10 @@ framework code.
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [Adding a New Tool](#adding-a-new-tool)
-3. [Adding a New Agent](#adding-a-new-agent)
+2. [Adding a New MCP Agent](#adding-a-new-mcp-agent)
+3. [Adding a Custom Agent](#adding-a-custom-agent)
 4. [Changing the LLM Provider](#changing-the-llm-provider)
-5. [Changing the Database / MCP Backend](#changing-the-database--mcp-backend)
+5. [Changing the MCP Backend](#changing-the-mcp-backend)
 6. [Customizing Safety Rules](#customizing-safety-rules)
 7. [Adapting to a Different Domain](#adapting-to-a-different-domain)
 8. [Frontend Customization](#frontend-customization)
@@ -26,184 +26,149 @@ framework code.
 ```
                           ┌──────────────────────────────────┐
                           │           Frontend               │
+                          │   ChatGPT-style conversation UI  │
                           │   (index.html / style.css / js)  │
-                          │   Served by FastAPI at /          │
                           └────────────┬─────────────────────┘
-                                       │ REST
+                                       │ REST (conversations API)
                           ┌────────────▼─────────────────────┐
                           │    Orchestrator Agent (port 8000) │
                           │    FastAPI + Strands Agent        │
                           │                                   │
-                          │  • Receives user queries (REST)   │
-                          │  • Runs safety review             │
-                          │  • Human-in-the-loop approval     │
-                          │  • Forwards to DB Agent via A2A   │
+                          │  • Conversation CRUD              │
+                          │  • Safety review + approval flow  │
+                          │  • Agent context isolation        │
+                          │  • Routes to agents via A2A       │
                           └────────────┬─────────────────────┘
                                        │ A2A Protocol
                           ┌────────────▼─────────────────────┐
-                          │    Database Agent (port 8001)     │
-                          │    Strands Agent + A2A Server     │
+                          │    Agents (from agents.yaml)      │
                           │                                   │
-                          │  Tools:                           │
-                          │  • schema_assistant (SELECT only) │
-                          │  • insert_assistant (INSERT)      │
-                          │  • delete_assistant (DELETE)       │
+                          │  MCP Agents:                      │
+                          │  • Config-driven (any MCP server) │
+                          │                                   │
+                          │  Custom Agents:                   │
+                          │  • Python factory (e.g. Graph)    │
                           └────────────┬─────────────────────┘
                                        │ MCP Protocol
                           ┌────────────▼─────────────────────┐
-                          │    Neon MCP Service               │
-                          │    (Remote — mcp.neon.tech)       │
-                          │                                   │
-                          │  MCP Tools:                       │
-                          │  • get_database_tables            │
-                          │  • describe_table_schema          │
-                          │  • run_sql                        │
+                          │    MCP Servers                    │
+                          │    (Remote or local, any provider)│
                           └──────────────────────────────────┘
 ```
 
 **Key concepts:**
 
-| Concept    | What it is | Where it lives |
-|------------|-----------|----------------|
-| **Agent**  | A Strands `Agent` with a system prompt and tools. Can be exposed as an A2A server. | `agents/` |
-| **Tool**   | A `@tool`-decorated Python function that an agent can invoke. Created via the factory. | `tools/` |
-| **MCP Client** | Connects an agent to an external service (e.g. Neon DB) via Model Context Protocol. | `mcp_client/` |
-| **Store**  | In-memory (swappable) persistence for query records and activity events. | `store.py` |
+| Concept | What it is | Where it lives |
+|---------|-----------|----------------|
+| **Agent** | A Strands `Agent` with a system prompt and tools. Exposed as an A2A server via `serve_agent()`. | `agents/` |
+| **MCP Agent** | Config-driven agent created from `agents.yaml`. No Python code needed. | `agents/mcp_agent.py` |
+| **Custom Agent** | Python-defined agent with a factory function (e.g. Graph Agent). | `agents/*.py` |
+| **Conversation** | A persistent chat thread with messages, events, and approval state. | `common/schemas.py` |
+| **ConversationStore** | Protocol for persisting conversations. In-memory by default, swappable to Postgres. | `common/store.py` |
+| **MCP Client** | Connects an agent to an external service via Model Context Protocol. | `mcp_client/` |
 
 ---
 
-## Adding a New Tool
+## Adding a New MCP Agent
 
-Tools are specialist functions that the Database Agent can route queries to.
-Each tool wraps its own Strands Agent + MCP client so it operates independently.
+The simplest way to add a new agent — no Python code required.
 
 ### Step-by-step
 
-**1. Create a new file in `tools/`:**
+**1. Add an entry to `agents.yaml`:**
 
-```python
-# tools/update_assistant.py
-"""Update operations tool."""
-
-from tools.assistant_factory import SHARED_PROMPT_SUFFIX, create_assistant_tool
-
-UPDATE_SYSTEM_PROMPT = f"""
-You are UpdateAssistant, responsible for UPDATE operations on the database.
-
-You may inspect schema details before updating data.
-Use the available MCP tools for these tasks:
-- get_database_tables: List all tables
-- describe_table_schema: Get table schema details
-- run_sql: Execute UPDATE statements and follow-up SELECT checks
-
-Only perform update operations or read-only checks needed to support an update.
-Do not insert, delete, alter, create, or drop database objects.
-{SHARED_PROMPT_SUFFIX}
-"""
-
-
-def create_update_tool(mcp_client_factory):
-    return create_assistant_tool(
-        tool_name="update_assistant",
-        tool_doc="Process and respond to UPDATE requests.",
-        system_prompt=UPDATE_SYSTEM_PROMPT,
-        query_prefix=(
-            "Handle this database update request, "
-            "inspecting the target table first if needed: "
-        ),
-        allowed_ops="Only execute UPDATE statements and read-only verification queries.",
-        mcp_client_factory=mcp_client_factory,
-    )
+```yaml
+agents:
+  - name: Analytics Agent
+    type: mcp
+    port: 8003
+    description: Handles data analysis and reporting queries
+    mcp_url: https://your-mcp-server.example.com/mcp
+    auth:
+      headers:
+        Authorization: "Bearer ${ANALYTICS_API_KEY}"
+    tools:
+      - run_query
+      - get_schema
+    system_prompt: |
+      You are an analytics specialist. Use the available MCP tools
+      to answer data analysis questions.
+    skills:
+      - id: analytics
+        name: Analytics
+        description: Data analysis and reporting
+        tags: [analytics, data]
 ```
 
-**2. Register the tool in the Database Agent** (`agents/db_agent.py`):
+**2. Set the required env var:**
 
-```python
-from tools.update_assistant import create_update_tool
-
-# Inside create_database_agent():
-tools=[
-    create_schema_tool(create_neon_mcp_client),
-    create_insert_tool(create_neon_mcp_client),
-    create_delete_tool(create_neon_mcp_client),
-    create_update_tool(create_neon_mcp_client),   # ← new
-]
+```bash
+# In .env
+ANALYTICS_API_KEY=your-key-here
 ```
 
-**3. Update the Database Agent system prompt** to mention the new tool:
+**3. Run the system:**
 
-```
-- update_assistant: for UPDATE operations
-```
-
-**4. If the new tool performs destructive operations**, add the relevant
-keywords to `DESTRUCTIVE_KEYWORDS` in `agents/orchestrator_agent.py`:
-
-```python
-DESTRUCTIVE_KEYWORDS = {"delete", "remove", "drop", "truncate", "destroy", "update"}
+```bash
+python run_system.py
 ```
 
-That's it. The orchestrator discovers tools automatically via A2A.
+The orchestrator auto-discovers agents from `agents.yaml` and builds its
+routing prompt dynamically. No changes to orchestrator code needed.
 
-### Factory parameters reference
+### agents.yaml reference
 
-| Parameter | Purpose |
-|-----------|---------|
-| `tool_name` | Function name exposed to the orchestrating agent (must be a valid Python identifier) |
-| `tool_doc` | Docstring shown to the LLM for routing decisions |
-| `system_prompt` | Governance prompt for the specialist agent |
-| `query_prefix` | Instruction prepended to the user's query |
-| `allowed_ops` | Short description added to the prompt suffix |
-| `mcp_client_factory` | Callable returning a fresh `MCPClient` per invocation |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Display name (used in orchestrator routing prompt) |
+| `type` | Yes | `mcp` or `custom` |
+| `port` | Yes | Port for the A2A server |
+| `description` | Yes | What this agent does (used for LLM routing) |
+| `mcp_url` | Yes (mcp) | URL of the MCP server |
+| `auth` | No | Auth headers with `${ENV_VAR}` references |
+| `tools` | No | Allowlist of MCP tool names (all tools if omitted) |
+| `system_prompt` | No | Custom system prompt for the agent |
+| `skills` | No | A2A skill declarations for the agent card |
+| `host` | No | Hostname (default: `localhost`) |
 
 ---
 
-## Adding a New Agent
+## Adding a Custom Agent
 
-Agents are independent processes that communicate via A2A protocol.
+For agents that need custom Python logic beyond what MCP provides.
 
 ### Step-by-step
 
 **1. Create the agent module** in `agents/`:
 
 ```python
-# agents/analytics_agent.py
-"""Analytics Agent -- exposed as an A2A server on port 8002."""
-
-import logging
-import os
-
+# agents/my_agent.py
 from strands import Agent
-from strands.multiagent.a2a import A2AServer
+from strands.tools.mcp import MCPClient
+from mcp.client.streamable_http import streamable_http_client
 
 from agents.model import create_model
-
-logger = logging.getLogger(__name__)
-
-ANALYTICS_PORT = int(os.environ.get("ANALYTICS_AGENT_PORT", "8002"))
-
-ANALYTICS_SYSTEM_PROMPT = """
-You are AnalyticsAgent, a specialist for data analysis queries.
-You generate charts, summaries, and insights from the data.
-"""
+from common.server import serve_agent
 
 
-def create_analytics_agent() -> Agent:
-    model = create_model()
+def create_my_agent() -> Agent:
+    """Create an agent that wraps your MCP server."""
+    mcp_client = MCPClient(
+        lambda: streamable_http_client("http://localhost:9000/mcp")
+    )
     return Agent(
-        model=model,
-        name="Analytics Agent",
-        description="Handles data analysis, charting, and insight generation",
-        system_prompt=ANALYTICS_SYSTEM_PROMPT,
-        tools=[],  # Add your tools here
+        model=create_model(),
+        name="My Agent",
+        description="Handles requests for my service",
+        system_prompt="You are a specialist agent for ...",
+        tools=[mcp_client],
+        callback_handler=None,
     )
 
 
 def serve():
-    logging.basicConfig(level=logging.INFO)
-    agent = create_analytics_agent()
-    a2a_server = A2AServer(agent=agent, enable_a2a_compliant_streaming=True)
-    a2a_server.serve(host="0.0.0.0", port=ANALYTICS_PORT)
+    agent = create_my_agent()
+    serve_agent(agent, name="my-agent", port=8003)
 
 
 if __name__ == "__main__":
@@ -212,40 +177,39 @@ if __name__ == "__main__":
     serve()
 ```
 
-**2. Register the agent URL with the Orchestrator:**
+**2. Register in `agents.yaml`:**
 
-```python
-# In agents/orchestrator_agent.py
-ANALYTICS_AGENT_URL = os.environ.get("ANALYTICS_AGENT_URL", "http://localhost:8002/")
-
-def _create_orchestrator_agent() -> Agent:
-    provider = A2AClientToolProvider(
-        known_agent_urls=[DATABASE_AGENT_URL, ANALYTICS_AGENT_URL]
-    )
-    ...
+```yaml
+agents:
+  - name: My Agent
+    type: custom
+    port: 8003
+    description: Handles requests for my service
+    module: agents.my_agent
+    factory: serve
 ```
 
 **3. Add the process to `run_system.py`:**
 
 ```python
-def start_analytics_agent():
-    from agents.analytics_agent import serve
+def start_my_agent():
+    from agents.my_agent import serve
     serve()
 
 # In main():
-analytics_process = multiprocessing.Process(target=start_analytics_agent, name="analytics-agent")
-analytics_process.start()
+my_process = multiprocessing.Process(target=start_my_agent, name="my-agent")
+my_process.start()
 ```
 
 **4. Add the service to `docker-compose.yml`:**
 
 ```yaml
-analytics-agent:
+my-agent:
   build: .
-  command: ["python", "-m", "agents.analytics_agent"]
+  command: ["python", "-m", "agents.my_agent"]
   env_file: .env
   ports:
-    - "8002:8002"
+    - "8003:8003"
 ```
 
 ---
@@ -282,7 +246,7 @@ def create_model() -> AnthropicModel:
     )
 ```
 
-Then update `requirements.txt`:
+Then update `pyproject.toml` dependencies:
 
 ```
 strands-agents[anthropic]   # instead of [gemini]
@@ -302,40 +266,29 @@ def create_model() -> BedrockModel:
 
 ---
 
-## Changing the Database / MCP Backend
+## Changing the MCP Backend
 
-The MCP client is isolated in `mcp_client/neon_mcp.py`. To switch databases:
+MCP servers are configured per-agent in `agents.yaml`. To change which MCP
+server an agent connects to, update its `mcp_url` and `auth` fields.
 
-### Using a different MCP-compatible service
+### Using a different MCP service
 
-Replace `create_neon_mcp_client()` with a client for your service:
-
-```python
-# mcp_client/your_mcp.py
-from strands.tools.mcp import MCPClient
-
-def create_your_mcp_client() -> MCPClient:
-    return MCPClient(
-        lambda: streamable_http_client(
-            "https://your-mcp-endpoint.com/mcp",
-            http_client=httpx.AsyncClient(
-                headers={"Authorization": f"Bearer {os.environ['YOUR_API_KEY']}"},
-            ),
-        ),
-    )
-```
-
-Then update the imports in `agents/db_agent.py`:
-
-```python
-from mcp_client.your_mcp import create_your_mcp_client
-
-# Replace create_neon_mcp_client with create_your_mcp_client
+```yaml
+agents:
+  - name: My DB Agent
+    type: mcp
+    port: 8001
+    description: Database queries via custom MCP server
+    mcp_url: https://your-mcp-endpoint.com/mcp
+    auth:
+      headers:
+        Authorization: "Bearer ${YOUR_API_KEY}"
 ```
 
 ### Using a local MCP server (stdio)
 
-If your MCP server runs as a subprocess (stdio transport):
+For MCP servers that run as subprocesses, create a custom agent that uses
+stdio transport:
 
 ```python
 from strands.tools.mcp import MCPClient
@@ -393,7 +346,7 @@ Output exactly one of:
 ### Adding multi-level approval
 
 Extend the approval flow in the orchestrator to require multiple reviewers
-or escalate based on query severity. The `store.py` `QueryStore` protocol
+or escalate based on query severity. The `ConversationStore` protocol
 supports adding custom fields to track approval chains.
 
 ---
@@ -403,66 +356,68 @@ supports adding custom fields to track approval chains.
 The orchestrator pattern is not database-specific. To adapt to a completely
 different domain (e.g. customer support, document processing, DevOps):
 
-### 1. Replace the specialist tools
+### 1. Define specialist agents in `agents.yaml`
 
-Instead of `schema_assistant` / `insert_assistant` / `delete_assistant`,
-create tools for your domain:
+```yaml
+agents:
+  - name: Ticket Handler
+    type: mcp
+    port: 8001
+    description: Create and manage support tickets
+    mcp_url: https://your-ticketing-mcp.example.com/mcp
+    system_prompt: You are a support ticket specialist...
 
-```python
-# tools/ticket_assistant.py
-def create_ticket_tool(mcp_client_factory):
-    return create_assistant_tool(
-        tool_name="ticket_handler",
-        tool_doc="Create and manage support tickets.",
-        system_prompt="You are TicketHandler...",
-        query_prefix="Handle this support request: ",
-        allowed_ops="Create, update, and close tickets.",
-        mcp_client_factory=mcp_client_factory,
-    )
+  - name: Knowledge Base
+    type: mcp
+    port: 8002
+    description: Search the company knowledge base
+    mcp_url: https://your-kb-mcp.example.com/mcp
+    system_prompt: You are a knowledge base search specialist...
 ```
 
-### 2. Replace or remove the MCP client
+### 2. Or use `@tool` for non-MCP integrations
 
-If your domain doesn't use MCP, create tools directly with `@tool`:
+Create a custom agent with native Python tools:
 
 ```python
-from strands import tool
+from strands import Agent, tool
 
 @tool
 def search_knowledge_base(query: str) -> str:
     """Search the company knowledge base."""
     # Call your API here
     return results
+
+agent = Agent(
+    model=create_model(),
+    tools=[search_knowledge_base],
+    system_prompt="You are a support agent...",
+)
 ```
 
-### 3. Update the agents
-
-- Rewrite `DATABASE_SYSTEM_PROMPT` → your domain-specific routing prompt
-- Replace the agent's tools list
-- Update `ORCHESTRATOR_SYSTEM_PROMPT` to match the new domain
-
-### 4. Update safety rules
+### 3. Update safety rules
 
 Change `DESTRUCTIVE_KEYWORDS` and the safety reviewer prompt to match
 the sensitive operations in your domain.
 
-### 5. Update the frontend
+### 4. Update the frontend
 
 - Change the title and placeholder text in `frontend/index.html`
-- Adjust the status badges in `frontend/style.css` if you add new statuses
-- Update the API client in `frontend/app.js` if your endpoints change
+- Adjust the CSS custom properties in `frontend/style.css` for theming
+- The conversation API (`/conversations`, `/conversations/{id}/messages`) stays the same
 
 ---
 
 ## Frontend Customization
 
-The frontend is plain HTML/CSS/JS served by FastAPI at `/`. No build step required.
+The frontend is a ChatGPT-style conversation UI — plain HTML/CSS/JS served
+by FastAPI at `/`. No build step required.
 
 | File | Purpose | How to customize |
 |------|---------|------------------|
-| `frontend/index.html` | Page structure | Edit HTML directly |
+| `frontend/index.html` | Page structure (sidebar + chat area) | Edit HTML directly |
 | `frontend/style.css` | All styles | Modify CSS custom properties in `:root` for theming |
-| `frontend/app.js` | API client + rendering | Edit the `ApiClient` class to change endpoints; edit `render*` functions for UI |
+| `frontend/app.js` | `ApiClient` class + rendering | Edit API methods or `render*` functions |
 
 ### Theming
 
@@ -487,10 +442,13 @@ Change the base URL in `frontend/app.js`:
 const api = new ApiClient("https://your-api.example.com");
 ```
 
-### Adding new pages
+### Key UI components
 
-Since there's no router, add new sections directly in `index.html` and
-toggle visibility via JS. Or serve multiple HTML files from the `frontend/` directory.
+- **Sidebar**: Conversation list with "New Chat" button
+- **Chat area**: Message thread with user/agent bubbles
+- **Approval dialog**: Inline approve/reject buttons when a conversation is `awaiting_approval`
+- **Activity log**: Collapsible panel showing agent routing events
+- **SSE log panel**: Real-time streaming logs from the orchestrator
 
 ---
 
@@ -502,77 +460,61 @@ toggle visibility via JS. Or serve multiple HTML files from the `frontend/` dire
 docker compose up --build
 ```
 
-Services:
+Services defined in `docker-compose.yml`:
 - **orchestrator** on port 8000 (includes the frontend at `/`)
-- **db-agent** on port 8001
+- **specialist agents** on their configured ports (from `agents.yaml`)
 
-### GCP Cloud Run
+### GCP Cloud Run + Terraform
 
-Each agent can be deployed as a separate Cloud Run service:
+1. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars`
+2. Create secrets in GCP Secret Manager for env vars
+3. Run `./deploy.sh`
+4. To tear down: `./destroy.sh`
 
-```bash
-# Build and push
-gcloud builds submit --tag gcr.io/PROJECT/orchestrator .
-gcloud builds submit --tag gcr.io/PROJECT/db-agent .
+### Authentication
 
-# Deploy
-gcloud run deploy orchestrator \
-  --image gcr.io/PROJECT/orchestrator \
-  --command python --args "-m,agents.orchestrator_agent" \
-  --set-env-vars DATABASE_AGENT_URL=https://db-agent-xxxxx.run.app/
+The system supports optional API key authentication:
 
-gcloud run deploy db-agent \
-  --image gcr.io/PROJECT/db-agent \
-  --command python --args "-m,agents.db_agent"
-```
+- **`X-API-Key`** header on the orchestrator (set `API_KEY` env var)
+- **`X-Agent-API-Key`** header for inter-agent A2A calls (set `AGENT_API_KEY` env var)
 
-### Adding Authentication
-
-The system does not include authentication by default. Options:
-
-1. **GCP IAP** (Identity-Aware Proxy) — adds Google SSO in front of Cloud Run
-2. **API Key header** — add `X-API-Key` validation middleware to FastAPI
-3. **Firebase Auth / Auth0** — JWT validation middleware
-4. **OAuth2** — use FastAPI's built-in OAuth2 support
+For stronger auth, add middleware for JWT validation (Firebase Auth, Auth0)
+or use GCP IAP in front of Cloud Run.
 
 ### Persistent Storage
 
-The in-memory `InMemoryStore` in `store.py` loses data on restart. For production,
-implement the `QueryStore` protocol with a persistent backend:
+The in-memory `InMemoryConversationStore` loses data on restart. For production:
+
+- Set `STORE_BACKEND=postgres` and `DATABASE_URL` to use `PostgresConversationStore`
+- Or implement the `ConversationStore` protocol with your preferred backend:
 
 ```python
 class FirestoreStore:
-    """Google Cloud Firestore implementation of QueryStore."""
+    """Google Cloud Firestore implementation of ConversationStore."""
 
-    def save(self, record: QueryResponse) -> None:
-        db.collection("queries").document(record.request_id).set(record.model_dump())
+    def create(self, conversation: Conversation) -> None:
+        db.collection("conversations").document(conversation.id).set(
+            conversation.model_dump()
+        )
 
-    def get(self, request_id: str) -> QueryResponse | None:
-        doc = db.collection("queries").document(request_id).get()
-        return QueryResponse(**doc.to_dict()) if doc.exists else None
+    def get(self, conversation_id: str) -> Conversation | None:
+        doc = db.collection("conversations").document(conversation_id).get()
+        return Conversation(**doc.to_dict()) if doc.exists else None
 
-    # ... implement remaining methods
+    # ... implement remaining methods (list_all, add_message, add_event, update, delete)
 ```
 
-Then swap the singleton in `store.py`:
+Then register it in `common/store.py`:
 
 ```python
-query_store = FirestoreStore()  # instead of InMemoryStore()
+def _create_store() -> ConversationStore:
+    if settings.store_backend == "firestore":
+        return FirestoreStore()
+    ...
 ```
 
 ### Rate Limiting
 
-Add `slowapi` to protect the `/query` endpoint:
-
-```python
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-
-@app.post("/query")
-@limiter.limit("10/minute")
-def submit_query(request: Request, payload: QueryRequest):
-    ...
-```
+Rate limiting is built in via `slowapi`. Configure via the `RATE_LIMIT` env var
+(default: `30/minute`). Applied to all endpoints except health checks and
+static files.

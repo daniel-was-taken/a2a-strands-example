@@ -28,6 +28,7 @@ from core.config import settings
 from core.log_stream import broadcaster
 from core.log_stream import install as install_sse_handler
 from core.model import create_model
+from core.safety import create_safety_reviewer, review_delete_request
 from core.schemas import (
     ActivityEvent,
     Conversation,
@@ -38,7 +39,6 @@ from core.schemas import (
     Message,
     MessageRequest,
 )
-from core.safety import create_safety_reviewer, review_delete_request
 from core.store import conversation_store
 
 logger = logging.getLogger(__name__)

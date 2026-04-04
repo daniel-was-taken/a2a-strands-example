@@ -27,8 +27,9 @@ Agents are declared in `agents.yaml` and spun up dynamically — no Python code 
 
 ### Key Features
 
-- **Safety review** -- Destructive queries (DELETE, DROP, TRUNCATE) are evaluated by an LLM reviewer. Rejected queries get `RECOMMENDED_REJECT` status; approved ones are parked as `PENDING_APPROVAL` for human confirmation.
-- **Conversation threads** -- Follow-up replies within a query thread (`POST /query/{id}/reply`).
+- **ChatGPT-style conversations** -- Multi-turn chat threads with persistent context. Each conversation is a first-class object with its own message history.
+- **Agent context isolation** -- The agent singleton's memory is reset before each turn; context is rebuilt from the conversation's stored messages (last 20). No cross-conversation leakage.
+- **Safety review** -- Destructive queries (DELETE, DROP, TRUNCATE) are evaluated by an LLM reviewer. The conversation enters `awaiting_approval` status for human confirmation with inline approve/reject UI.
 - **SSE log streaming** -- Real-time agent logs via `GET /logs/stream`.
 - **Auth** -- Optional `X-API-Key` header on the orchestrator, optional `X-Agent-API-Key` for inter-agent calls.
 - **Rate limiting** -- Configurable via `RATE_LIMIT` (default: `30/minute`).
@@ -66,31 +67,32 @@ MCP server credentials (API keys, etc.) are referenced by `agents.yaml` auth blo
 python run_system.py
 ```
 
-### 4. Make requests
+### 4. Open the UI
+
+Navigate to `http://localhost:8000` in your browser. Click **+ New Chat** to start a conversation.
+
+### 5. API usage (curl)
 
 ```bash
-# Read-only query
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Show me all tables in the database"}'
+# Create a conversation
+curl -X POST http://localhost:8000/conversations
 
-# Insert
-curl -X POST http://localhost:8000/query \
+# Send a message
+curl -X POST http://localhost:8000/conversations/<id>/messages \
   -H "Content-Type: application/json" \
-  -d '{"query": "Insert a new employee named Jane Doe with email jane@example.com"}'
+  -d '{"content": "Show me all tables in the database"}'
 
-# Delete (triggers safety review + approval flow)
-curl -X POST http://localhost:8000/query \
+# Send a destructive query (triggers safety review + approval flow)
+curl -X POST http://localhost:8000/conversations/<id>/messages \
   -H "Content-Type: application/json" \
-  -d '{"query": "Delete the employee with id 5"}'
+  -d '{"content": "Delete the employee with id 5"}'
 
-# Approve a pending query
-curl -X POST http://localhost:8000/queries/approve/<approval_id>
+# Approve / reject a pending destructive query
+curl -X POST http://localhost:8000/conversations/<id>/approve
+curl -X POST http://localhost:8000/conversations/<id>/reject
 
-# Follow-up reply
-curl -X POST http://localhost:8000/query/<request_id>/reply \
-  -H "Content-Type: application/json" \
-  -d '{"query": "How many rows were affected?"}'
+# List conversations
+curl http://localhost:8000/conversations
 
 # Health check
 curl http://localhost:8000/health
@@ -140,14 +142,18 @@ if __name__ == "__main__":
 
 ### Register with the orchestrator
 
-1. Add the URL to `common/config.py`:
-   ```python
-   my_agent_url: str = "http://localhost:8003/"
+1. Add an entry to `agents.yaml` for auto-discovery:
+   ```yaml
+   agents:
+     - name: My Agent
+       type: custom
+       port: 8003
+       description: Handles requests for my service
+       module: agents.my_agent
+       factory: serve
    ```
 
-2. Add the URL to the orchestrator's `known_agent_urls` list and system prompt in `agents/orchestrator_agent.py`.
-
-3. Add a process entry in `run_system.py` (for local dev) and a service in `docker-compose.yml` (for Docker).
+2. Add a process entry in `run_system.py` (for local dev) and a service in `docker-compose.yml` (for Docker).
 
 ## API Endpoints
 
@@ -155,12 +161,13 @@ if __name__ == "__main__":
 |--------|------|-------------|
 | `GET` | `/health` | Liveness check |
 | `GET` | `/ready` | Readiness probe (verifies agent initialization) |
-| `POST` | `/query` | Submit a query |
-| `GET` | `/queries` | List all queries (newest first) |
-| `GET` | `/queries/{request_id}` | Get a single query |
-| `POST` | `/queries/approve/{approval_id}` | Approve a pending destructive query |
-| `POST` | `/queries/reject/{approval_id}` | Reject a pending destructive query |
-| `POST` | `/query/{request_id}/reply` | Send a follow-up message |
+| `POST` | `/conversations` | Create a new conversation |
+| `GET` | `/conversations` | List all conversations (newest first) |
+| `GET` | `/conversations/{id}` | Get a conversation with full message history |
+| `DELETE` | `/conversations/{id}` | Delete a conversation |
+| `POST` | `/conversations/{id}/messages` | Send a message in a conversation |
+| `POST` | `/conversations/{id}/approve` | Approve a pending destructive query |
+| `POST` | `/conversations/{id}/reject` | Reject a pending destructive query |
 | `GET` | `/logs/stream` | SSE log stream |
 | `GET` | `/` | Frontend UI |
 
@@ -182,8 +189,8 @@ a2a-strands-example/
 ├── common/
 │   ├── config.py                     # Pydantic Settings (all env vars)
 │   ├── server.py                     # serve_agent() helper for A2A servers
-│   ├── schemas.py                    # Pydantic request/response models
-│   ├── store.py                      # QueryStore protocol + InMemoryStore
+│   ├── schemas.py                    # Pydantic models (Conversation, Message, etc.)
+│   ├── store.py                      # ConversationStore protocol + InMemoryStore
 │   ├── auth.py                       # X-Agent-API-Key middleware
 │   ├── log_stream.py                 # SSE broadcaster
 │   ├── logging_setup.py              # Structured JSON logging
@@ -194,7 +201,7 @@ a2a-strands-example/
 ├── mcp_client/
 │   └── client.py                     # Generic MCP client factory + registry
 ├── db/
-│   └── repository.py                 # PostgreSQL QueryStore implementation
+│   └── repository.py                 # PostgreSQL ConversationStore implementation
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
@@ -207,10 +214,11 @@ a2a-strands-example/
 └── tests/
     ├── conftest.py                   # Shared fixtures (fully mocked)
     ├── test_smoke.py
-    ├── test_orchestrator.py          # Query lifecycle tests
-    ├── test_store.py                 # InMemoryStore tests
+    ├── test_orchestrator.py          # Conversation lifecycle tests
+    ├── test_store.py                 # ConversationStore tests
     ├── unit/
-    │   └── test_common.py            # Auth, task store, logging tests
+    │   ├── test_common.py            # Auth, task store, logging tests
+    │   └── test_schemas.py           # Conversation data model tests
     ├── integration/
     │   ├── test_a2a_server.py        # A2A protocol tests
     │   └── test_agent_card.py        # AgentCard contract tests
@@ -230,7 +238,7 @@ pytest
 pytest tests/test_orchestrator.py -v
 
 # Run a single test
-pytest tests/test_orchestrator.py::test_submit_non_destructive_query
+pytest tests/test_orchestrator.py::test_send_message
 
 # Stop on first failure
 pytest -x
