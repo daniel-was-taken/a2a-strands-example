@@ -7,14 +7,12 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir .
 
 # Copy application code.
+COPY core/ core/
 COPY agents/ agents/
-COPY common/ common/
-COPY tools/ tools/
-COPY mcp_client/ mcp_client/
 COPY db/ db/
 COPY frontend/ frontend/
 
 EXPOSE 8000
 
-# Default: run orchestrator (pair with db-agent via docker-compose).
-CMD ["python", "-m", "agents.orchestrator_agent"]
+# Default: run orchestrator (pair with agents via docker-compose).
+CMD ["python", "-m", "core.orchestrator"]

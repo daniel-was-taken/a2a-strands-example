@@ -23,7 +23,7 @@ load_dotenv()
 
 def _load_agents_config() -> list[dict]:
     """Load agent definitions from the YAML config."""
-    from agents.mcp_agent import load_agents_config
+    from core.server import load_agents_config
 
     config_path = os.environ.get("AGENTS_CONFIG", "agents.yaml")
     return load_agents_config(config_path)
@@ -88,7 +88,7 @@ def main():
     if mode == "direct":
         print("Starting system (direct mode -- single process)...")
         print("  Orchestrator -> http://localhost:8000\n")
-        os.execvp(python, [python, "-m", "agents.orchestrator_agent"])
+        os.execvp(python, [python, "-m", "core.orchestrator"])
         return
 
     agents_config = _load_agents_config()
@@ -109,7 +109,7 @@ def main():
             cmd = [
                 python,
                 "-m",
-                "agents.mcp_agent",
+                "core.server",
                 "--config",
                 config_path,
                 "--agent",
@@ -142,10 +142,10 @@ def main():
 
     print("Agents healthy. Starting orchestrator...\n")
 
-    orch = subprocess.Popen([python, "-m", "agents.orchestrator_agent"])
+    orch = subprocess.Popen([python, "-m", "core.orchestrator"])
     all_procs = agent_procs + [orch]
 
-    print("All components started. Send requests to http://localhost:8000/query")
+    print("All components started. Send requests to http://localhost:8000")
     print("Press Ctrl+C to stop.\n")
 
     def _shutdown(signum, _frame):

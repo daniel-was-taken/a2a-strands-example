@@ -1,7 +1,7 @@
 services:
   orchestrator:
     build: .
-    command: ["python", "-m", "agents.orchestrator_agent"]
+    command: ["python", "-m", "core.orchestrator"]
     env_file: .env
     ports:
       - "8000:8000"
@@ -9,12 +9,11 @@ services:
       DATABASE_MODE: "a2a"
       AGENTS_CONFIG: "/app/agents.yaml"
     volumes:
-      - ./agents-docker.yaml:/app/agents.yaml:ro
+      - ./agents.yaml:/app/agents.yaml:ro
     depends_on:
-      - db-reader
-      - db-writer
-      - db-deleter
-      - graph-agent
+      - database-agent
+      - graph-reviewer
+      - research-team
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -23,14 +22,14 @@ services:
       retries: 3
       start_period: 10s
 
-  db-reader:
+  database-agent:
     build: .
-    command: ["python", "-m", "agents.mcp_agent", "--config", "/app/agents.yaml", "--agent", "Database Reader"]
+    command: ["python", "-m", "core.server", "--config", "/app/agents.yaml", "--agent", "Database Agent"]
     env_file: .env
     ports:
       - "8001:8001"
     volumes:
-      - ./agents-docker.yaml:/app/agents.yaml:ro
+      - ./agents.yaml:/app/agents.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/.well-known/agent-card.json"]
@@ -39,49 +38,33 @@ services:
       retries: 3
       start_period: 10s
 
-  db-writer:
+  graph-reviewer:
     build: .
-    command: ["python", "-m", "agents.mcp_agent", "--config", "/app/agents.yaml", "--agent", "Database Writer"]
-    env_file: .env
-    ports:
-      - "8003:8003"
-    volumes:
-      - ./agents-docker.yaml:/app/agents.yaml:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/.well-known/agent-card.json"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  db-deleter:
-    build: .
-    command: ["python", "-m", "agents.mcp_agent", "--config", "/app/agents.yaml", "--agent", "Database Deleter"]
-    env_file: .env
-    ports:
-      - "8004:8004"
-    volumes:
-      - ./agents-docker.yaml:/app/agents.yaml:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/.well-known/agent-card.json"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  graph-agent:
-    build: .
-    command: ["python", "-m", "agents.graph_agent"]
+    command: ["python", "-m", "agents.graph_reviewer"]
     env_file: .env
     ports:
       - "8002:8002"
     volumes:
-      - ./agents-docker.yaml:/app/agents.yaml:ro
+      - ./agents.yaml:/app/agents.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/.well-known/agent-card.json"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  research-team:
+    build: .
+    command: ["python", "-m", "agents.research_team"]
+    env_file: .env
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./agents.yaml:/app/agents.yaml:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/.well-known/agent-card.json"]
       interval: 30s
       timeout: 5s
       retries: 3
