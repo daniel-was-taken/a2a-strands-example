@@ -18,7 +18,7 @@ from typing import Any
 import psycopg2
 import psycopg2.extras
 
-from common.schemas import ActivityEvent, Conversation, ConversationStatus, Message
+from core.schemas import ActivityEvent, Conversation, ConversationStatus, Message
 
 _COLUMNS = (
     "id, title, status, approval_id, review_verdict, review_recommended_reject,"
