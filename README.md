@@ -1,299 +1,129 @@
 # A2A Multi-Agent System
 
-A production-ready [Agent-to-Agent (A2A)](https://github.com/google/a2a-spec) multi-agent system built with the [Strands Agents SDK](https://github.com/strands-agents/sdk-python). An orchestrator routes user queries to specialist agents over HTTP using the A2A protocol.
-
-**LLM:** Google Gemini (configurable via `GEMINI_MODEL_ID`)
-**MCP:** Any MCP server (configured per-agent in `agents.yaml`)
-**Framework:** FastAPI + Strands A2A SDK
-
-## Architecture
+Multi-agent system using [Strands Agents SDK](https://github.com/strands-agents/sdk-python) and the [A2A protocol](https://github.com/google/a2a-spec). Orchestrator routes queries to specialist agents. Agents are declared in `agents.yaml` -- no code changes needed to add a new MCP-backed agent.
 
 ```
-User -> Orchestrator (FastAPI :8000)
-            |
-            +-- A2A --> [Agents declared in agents.yaml]
-                        ├── Database Agent  (MCP, port 8001)
-                        ├── Graph Reviewer  (custom, port 8002)
-                        └── Research Team   (custom, port 8003)
+User -> Orchestrator (:8000) --A2A--> Database Agent  (:8001, MCP)
+             |                   |--> Graph Reviewer  (:8002, custom)
+             |                   `--> Research Team   (:8003, custom)
+             v
+        Frontend (/) + REST API (/conversations/*)
 ```
 
-The codebase has a clear boundary: **`core/`** is the framework (logging, auth, serving, MCP client, safety review — don't modify), **`agents/`** is user agents (fork and customize). Agents are declared in `agents.yaml` and spun up dynamically — no Python code changes needed to add a new MCP-backed agent. The orchestrator discovers agents via `A2AClientToolProvider` and routes queries based on intent. Each specialist agent runs as an independent A2A server.
+`core/` = framework (don't modify) | `agents/` = your agents (fork and customize)
 
-### Two Operating Modes
-
-| Mode | Command | Description |
-|------|---------|-------------|
-| **A2A** (default) | `python run_system.py` | Orchestrator + agents from agents.yaml |
-| **Direct** | `DATABASE_MODE=direct python run_system.py` | Single process, first MCP agent in-process |
-
-### Key Features
-
-- **ChatGPT-style conversations** -- Multi-turn chat threads with persistent context. Each conversation is a first-class object with its own message history.
-- **Agent context isolation** -- The agent singleton's memory is reset before each turn; context is rebuilt from the conversation's stored messages (last 20). No cross-conversation leakage.
-- **Safety review** -- Destructive queries (DELETE, DROP, TRUNCATE) are evaluated by an LLM reviewer. The conversation enters `awaiting_approval` status for human confirmation with inline approve/reject UI.
-- **SSE log streaming** -- Real-time agent logs via `GET /logs/stream`.
-- **Auth** -- Optional `X-API-Key` header on the orchestrator, optional `X-Agent-API-Key` for inter-agent calls.
-- **Rate limiting** -- Configurable via `RATE_LIMIT` (default: `30/minute`).
-- **Swappable persistence** -- In-memory (default) or PostgreSQL (`STORE_BACKEND=postgres`).
-- **OpenTelemetry tracing** -- Set `OTEL_EXPORTER_OTLP_ENDPOINT` to enable.
-
-## Quick Start
-
-### 1. Create a virtual environment and install
+## Setup
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+cp .env.example .env              # set GOOGLE_API_KEY + MCP credentials
+python run_system.py              # starts orchestrator + all agents
+# open http://localhost:8000
 ```
 
-### 2. Configure environment
+Direct mode (single process, no A2A): `DATABASE_MODE=direct python run_system.py`
+
+## API
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/conversations` | Create conversation |
+| `POST` | `/conversations/{id}/messages` | Send message |
+| `GET` | `/conversations` | List conversations |
+| `GET` | `/conversations/{id}` | Get conversation |
+| `DELETE` | `/conversations/{id}` | Delete conversation |
+| `POST` | `/conversations/{id}/approve` | Approve destructive query |
+| `POST` | `/conversations/{id}/reject` | Reject destructive query |
+| `GET` | `/logs/stream` | SSE log stream |
+| `GET` | `/health` | Health check |
 
 ```bash
-cp .env.example .env
-```
-
-Required variables:
-
-| Variable | Description |
-|----------|-------------|
-| `GOOGLE_API_KEY` | Google AI Studio API key (for Gemini) |
-| `AGENTS_CONFIG` | Path to agents YAML config (default: `agents.yaml`) |
-
-MCP server credentials (API keys, etc.) are referenced by `agents.yaml` auth blocks and should be set as env vars. See `.env.example` for the full list of optional settings.
-
-### 3. Run
-
-```bash
-python run_system.py
-```
-
-### 4. Open the UI
-
-Navigate to `http://localhost:8000` in your browser. Click **+ New Chat** to start a conversation.
-
-### 5. API usage (curl)
-
-```bash
-# Create a conversation
 curl -X POST http://localhost:8000/conversations
-
-# Send a message
 curl -X POST http://localhost:8000/conversations/<id>/messages \
   -H "Content-Type: application/json" \
-  -d '{"content": "Show me all tables in the database"}'
-
-# Send a destructive query (triggers safety review + approval flow)
-curl -X POST http://localhost:8000/conversations/<id>/messages \
-  -H "Content-Type: application/json" \
-  -d '{"content": "Delete the employee with id 5"}'
-
-# Approve / reject a pending destructive query
-curl -X POST http://localhost:8000/conversations/<id>/approve
-curl -X POST http://localhost:8000/conversations/<id>/reject
-
-# List conversations
-curl http://localhost:8000/conversations
-
-# Health check
-curl http://localhost:8000/health
+  -d '{"content": "Show me all tables"}'
 ```
 
-## Adding a New Agent
+## Adding Agents
 
-The project is designed so that anyone can add a new A2A agent with minimal boilerplate. The `serve_agent()` helper in `core/server.py` handles all the server infrastructure (logging, tracing, A2A protocol, auth middleware, CORS).
+**MCP agent** -- YAML only, no Python:
 
-Four patterns are available:
+```yaml
+# agents.yaml
+- name: My Agent
+  type: mcp
+  port: 8004
+  description: What this agent does
+  mcp_url: https://example.com/mcp
+  auth:
+    type: bearer
+    env_var: MY_API_KEY
+  system_prompt: You are a specialist for ...
+  skills:
+    - id: my-skill
+      name: My Skill
+      description: What this skill does
+      tags: [example]
+```
 
-1. **MCP** — YAML-only config in `agents.yaml`, no Python needed
-2. **Graph** — GraphBuilder workflow (see `agents/graph_reviewer.py`)
-3. **Swarm** — Autonomous handoffs (see `agents/research_team.py`)
-4. **Pipeline** — Graph with remote A2AAgent nodes (see `examples/pipeline_agent.py`)
-
-### Minimal custom agent example
+**Custom agent** -- Python + YAML:
 
 ```python
 # agents/my_agent.py
 from strands import Agent
-from strands.tools.mcp import MCPClient
-from mcp.client.streamable_http import streamable_http_client
-
 from core.model import create_model
 from core.server import serve_agent
 
-
-def create_my_agent() -> Agent:
-    """Create an agent that wraps your MCP server."""
-    mcp_client = MCPClient(
-        lambda: streamable_http_client("http://localhost:9000/mcp")
-    )
-    return Agent(
-        model=create_model(),
-        name="My Agent",
-        description="Handles requests for my service",
-        system_prompt="You are a specialist agent for ...",
-        tools=[mcp_client],
-        callback_handler=None,
-    )
-
-
-def serve():
-    agent = create_my_agent()
-    serve_agent(agent, name="my-agent", port=8004)
-
+agent = Agent(model=create_model(), name="My Agent", tools=[...], callback_handler=None)
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
-    load_dotenv()
-    serve()
+    serve_agent(agent, name="my-agent", port=8004)
 ```
 
-### Register with the orchestrator
-
-1. Add an entry to `agents.yaml` for auto-discovery:
-   ```yaml
-   agents:
-     - name: My Agent
-       type: custom
-       port: 8004
-       description: Handles requests for my service
-       module: agents.my_agent
-       factory: serve
-   ```
-
-2. Add a process entry in `run_system.py` (for local dev) and a service in `docker-compose.yml` (for Docker).
-
-## API Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Liveness check |
-| `GET` | `/ready` | Readiness probe (verifies agent initialization) |
-| `POST` | `/conversations` | Create a new conversation |
-| `GET` | `/conversations` | List all conversations (newest first) |
-| `GET` | `/conversations/{id}` | Get a conversation with full message history |
-| `DELETE` | `/conversations/{id}` | Delete a conversation |
-| `POST` | `/conversations/{id}/messages` | Send a message in a conversation |
-| `POST` | `/conversations/{id}/approve` | Approve a pending destructive query |
-| `POST` | `/conversations/{id}/reject` | Reject a pending destructive query |
-| `GET` | `/logs/stream` | SSE log stream |
-| `GET` | `/` | Frontend UI |
-
-## Project Structure
-
-```
-a2a-strands-example/
-├── run_system.py                     # System runner (A2A or direct mode)
-├── pyproject.toml                    # Build config, dependencies, tool settings
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-├── agents.yaml                       # Agent definitions (MCP and custom types)
-├── core/                             # Framework — do not modify when forking
-│   ├── config.py                     # Pydantic Settings (all env vars)
-│   ├── orchestrator.py               # Orchestrator (FastAPI, routes to agents)
-│   ├── server.py                     # serve_agent() + MCP agent factory + CLI
-│   ├── mcp.py                        # Generic MCP client factory + registry
-│   ├── model.py                      # Shared Gemini model factory
-│   ├── safety.py                     # LLM-based safety reviewer
-│   ├── schemas.py                    # Pydantic models (Conversation, Message, etc.)
-│   ├── store.py                      # ConversationStore protocol + InMemoryStore
-│   ├── auth.py                       # X-Agent-API-Key middleware
-│   ├── log_stream.py                 # SSE broadcaster
-│   ├── logging.py                    # Structured JSON logging
-│   ├── task_store.py                 # In-memory A2A TaskStore
-│   └── tracing.py                    # OpenTelemetry setup
-├── agents/                           # User agents — fork and customize
-│   ├── graph_reviewer.py             # Graph Agent (analyze -> implement -> review)
-│   └── research_team.py              # Swarm Agent (autonomous handoffs)
-├── examples/                         # Standalone pattern demos
-│   ├── a2a_graph.py                  # A2A + graph pattern example
-│   ├── a2a_swarm.py                  # A2A + swarm pattern example
-│   ├── mcp_agent.py                  # Minimal MCP agent example
-│   └── pipeline_agent.py             # Graph with remote A2AAgent nodes
-├── db/
-│   └── repository.py                 # PostgreSQL ConversationStore implementation
-├── frontend/
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
-├── infra/                            # Terraform (Cloud Run + Artifact Registry)
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── terraform.tfvars.example
-└── tests/
-    ├── conftest.py                   # Shared fixtures (fully mocked)
-    ├── test_smoke.py
-    ├── test_orchestrator.py          # Conversation lifecycle tests
-    ├── test_store.py                 # ConversationStore tests
-    ├── unit/
-    │   ├── test_core.py              # Auth, task store, logging tests
-    │   └── test_schemas.py           # Conversation data model tests
-    ├── integration/
-    │   ├── test_mcp.py               # MCP agent + client tests
-    │   ├── test_a2a_server.py        # A2A protocol tests
-    │   └── test_agent_card.py        # AgentCard contract tests
-    └── e2e/
-        └── test_e2e_stub.py          # E2E stubs (requires running system)
+```yaml
+# agents.yaml
+- name: My Agent
+  type: custom
+  port: 8004
+  description: What this agent does
+  module: agents.my_agent
+  factory: serve
 ```
 
-## Testing
+Four patterns: **MCP** (YAML-only), **Graph** (`agents/graph_reviewer.py`), **Swarm** (`agents/research_team.py`), **Pipeline** (`examples/pipeline_agent.py`).
 
-All tests use mocked agents -- no real API keys or database connections needed.
+## Key Features
+
+- **Safety review** -- destructive queries (DELETE/DROP/TRUNCATE) go through LLM review + human approval
+- **Context isolation** -- agent memory reset per turn, rebuilt from conversation history (last 20 messages)
+- **Auth** -- `X-API-Key` on orchestrator, `X-Agent-API-Key` for inter-agent calls
+- **Persistence** -- in-memory (default) or PostgreSQL (`STORE_BACKEND=postgres`)
+- **Observability** -- structured JSON logging, SSE log stream, OpenTelemetry tracing
+- **Rate limiting** -- configurable via `RATE_LIMIT`
+
+## Development
 
 ```bash
-# Run all tests
-pytest
-
-# Run a specific file
-pytest tests/test_orchestrator.py -v
-
-# Run a single test
-pytest tests/test_orchestrator.py::test_send_message
-
-# Stop on first failure
-pytest -x
-```
-
-## Code Quality
-
-```bash
-# Lint
-ruff check .
-
-# Auto-fix lint issues
-ruff check --fix .
-
-# Format
-ruff format .
-
-# Type checking
-mypy core/ agents/ db/
-```
-
-## Docker
-
-```bash
-# Build and run all services
-docker compose up --build
-
-# Run a single agent
-docker compose up database-agent
+pytest                            # tests (fully mocked, no API keys needed)
+ruff check . && ruff format .     # lint + format
+mypy core/ agents/ db/            # type check
+docker compose up --build         # run with Docker
 ```
 
 ## Deployment
 
-### Cloud Run + Terraform
+```bash
+cp infra/terraform.tfvars.example infra/terraform.tfvars  # configure GCP project
+./deploy.sh                                                # build, push, terraform apply
+./destroy.sh                                               # tear down
+```
 
-1. Copy `infra/terraform.tfvars.example` to `infra/terraform.tfvars` and fill in your GCP project config.
-2. Create secrets in GCP Secret Manager for the required environment variables.
-3. Run `./deploy.sh`.
-4. To tear down: `./destroy.sh`.
+## Diagrams
+
+- [Architecture](docs/architecture.md) -- system components, data flows, sequence diagrams
+- [Use Cases](docs/use-cases.md) -- actor interactions, detailed use case descriptions
 
 ## References
 
-- [Strands Agents SDK](https://github.com/strands-agents/sdk-python)
-- [Strands A2A Documentation](https://strandsagents.com/latest/user-guide/concepts/multi-agent/a2a/)
-- [A2A Protocol Specification](https://github.com/google/a2a-spec)
-- [Neon MCP](https://neon.tech/docs/get-started-with-neon/mcp)
+[Strands SDK](https://github.com/strands-agents/sdk-python) | [A2A Spec](https://github.com/google/a2a-spec) | [Neon MCP](https://neon.tech/docs/get-started-with-neon/mcp)
