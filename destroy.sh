@@ -14,7 +14,7 @@ if [[ ! -f "${INFRA_DIR}/terraform.tfvars" ]]; then
   exit 1
 fi
 
-echo "=== A2A Orchestrator Destroy ==="
+echo "=== A2A Agent Runner Destroy ==="
 echo ""
 echo "This will permanently delete all deployed infrastructure."
 read -rp "Continue? (y/N) " confirm

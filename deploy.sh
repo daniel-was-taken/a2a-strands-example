@@ -30,7 +30,7 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 REPO_URL="${REGION}-docker.pkg.dev/${PROJECT_ID}/a2a-orchestrator"
 IMAGE="${REPO_URL}/${SERVICE_NAME}:${IMAGE_TAG}"
 
-echo "=== A2A Orchestrator Deploy ==="
+echo "=== A2A Agent Runner Deploy ==="
 echo "  Project:  ${PROJECT_ID}"
 echo "  Region:   ${REGION}"
 echo "  Image:    ${IMAGE}"

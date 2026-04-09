@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""A2A Orchestrator -- System Runner.
+"""A2A Agent Runner.
 
-Reads agents.yaml and starts all declared agents plus the orchestrator
-as separate processes.
+Reads agents.yaml and starts all declared agents as separate processes.
 
 Usage:
-    python run_system.py                          # A2A mode (default)
-    DATABASE_MODE=direct python run_system.py     # Direct mode -- orchestrator only
+    python run_system.py
 """
 
 import os
@@ -79,24 +77,14 @@ def _wait_for_agents(
 
 
 def main():
-    mode = os.environ.get("DATABASE_MODE", "a2a")
     python = sys.executable
     config_path = os.environ.get("AGENTS_CONFIG", "agents.yaml")
-
-    print("\n=== A2A Orchestrator ===\n")
-
-    if mode == "direct":
-        print("Starting system (direct mode -- single process)...")
-        print("  Orchestrator -> http://localhost:8000\n")
-        os.execvp(python, [python, "-m", "core.orchestrator"])
-        return
-
     agents_config = _load_agents_config()
 
-    print("Starting system (A2A mode)...")
+    print("\n=== A2A Agent Runner ===\n")
+    print("Starting agents...")
     for cfg in agents_config:
         print(f"  {cfg['name']:20s} -> http://localhost:{cfg['port']}")
-    print(f"  {'Orchestrator':20s} -> http://localhost:8000")
     print()
 
     # Start agent processes
@@ -140,19 +128,13 @@ def main():
             p.wait(timeout=5)
         sys.exit(1)
 
-    print("Agents healthy. Starting orchestrator...\n")
-
-    orch = subprocess.Popen([python, "-m", "core.orchestrator"])
-    all_procs = agent_procs + [orch]
-
-    print("All components started. Send requests to http://localhost:8000")
-    print("Press Ctrl+C to stop.\n")
+    print("\nAll agents started. Press Ctrl+C to stop.\n")
 
     def _shutdown(signum, _frame):
         print("\nShutting down...")
-        for p in all_procs:
+        for p in agent_procs:
             p.terminate()
-        for p in all_procs:
+        for p in agent_procs:
             try:
                 p.wait(timeout=5)
             except subprocess.TimeoutExpired:
@@ -164,11 +146,10 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
 
     while True:
-        for i, p in enumerate(all_procs):
+        for i, p in enumerate(agent_procs):
             ret = p.poll()
             if ret is not None:
-                name = "orchestrator" if p is orch else agent_names[i]
-                print(f"\n{name} exited (code {ret}). Shutting down.", file=sys.stderr)
+                print(f"\n{agent_names[i]} exited (code {ret}). Shutting down.", file=sys.stderr)
                 _shutdown(signal.SIGTERM, None)
         time.sleep(1)
 

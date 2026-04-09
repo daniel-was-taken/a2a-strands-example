@@ -5,7 +5,7 @@ build-backend = "setuptools.backends.legacy:build"
 [project]
 name = "a2a-strands-example"
 version = "1.0.0"
-description = "Production-grade A2A multi-agent system using Strands Agents SDK"
+description = "A2A agent framework using Strands Agents SDK"
 requires-python = ">=3.11"
 dependencies = [
     "strands-agents[a2a,gemini]>=1.32.0,<2.0.0",
@@ -16,8 +16,6 @@ dependencies = [
     "httpx>=0.28.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.0",
-    "psycopg2-binary>=2.9.0",
-    "slowapi>=0.1.9",
     "botocore[crt]",
     "pyyaml>=6.0",
 ]
@@ -33,7 +31,6 @@ dev = [
     "anyio[trio]>=4.0.0",
     "ruff>=0.9.0",
     "mypy>=1.15.0",
-    "types-psycopg2>=2.9.0",
 ]
 
 # ── Ruff (linting + formatting) ───────────────────────────────────────────────
@@ -49,7 +46,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["core", "agents", "db"]
+known-first-party = ["core", "agents"]
 
 # ── Mypy ──────────────────────────────────────────────────────────────────────
 [tool.mypy]

@@ -1,4 +1,4 @@
-"""Centralised Pydantic Settings for the entire project.
+"""Centralised Pydantic Settings for the A2A agent framework.
 
 All environment variables are declared here.  Individual modules import
 ``settings`` rather than calling ``os.environ.get`` scattered across files,
@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """All configurable values for the A2A Orchestrator system."""
+    """All configurable values for the A2A agent framework."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -19,14 +19,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Orchestrator ──────────────────────────────────────────────────────────
-    orchestrator_port: int = 8000
-    database_mode: str = "a2a"
+    # ── Agent Serving ─────────────────────────────────────────────────────────
     #: Comma-separated list of allowed CORS origins.
     allowed_origins: str = "*"
-    #: When non-empty, the orchestrator validates this key on every request.
-    api_key: str = ""
-    rate_limit: str = "30/minute"
     #: Path to the agents YAML config file.
     agents_config: str = "agents.yaml"
 
@@ -35,10 +30,6 @@ class Settings(BaseSettings):
     google_cloud_project: str | None = None
     google_cloud_location: str = "us-central1"
     gemini_model_id: str = "gemini-2.5-flash"
-
-    # ── Query Store ───────────────────────────────────────────────────────────
-    store_backend: str = "memory"
-    database_url: str | None = None
 
     # ── Agent-to-Agent Auth ───────────────────────────────────────────────────
     #: Shared secret for inter-agent calls (X-Agent-API-Key header).

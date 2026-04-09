@@ -57,10 +57,43 @@ class ReconnectingMCPClient(MCPClient):
         arguments: dict[str, Any] | None = None,
         read_timeout_seconds: timedelta | None = None,
     ) -> MCPToolResult:
-        """Call a tool, reconnecting first if the session is dead."""
+        """Call a tool, reconnecting first if the session is dead.
+
+        Also works around MCP servers that return a plain string instead of the
+        spec-required ``list[Content]`` (e.g. Kaggle's MCP endpoint).  When
+        Pydantic validation fails we surface the raw message as a text result
+        so the agent can still use the response.
+        """
         if not self._is_session_active():
             self._reconnect()
-        return await super().call_tool_async(tool_use_id, name, arguments, read_timeout_seconds)
+        try:
+            return await super().call_tool_async(
+                tool_use_id, name, arguments, read_timeout_seconds
+            )
+        except Exception as exc:
+            if type(exc).__name__ == "ValidationError":
+                # Some MCP servers (e.g. Kaggle) return a plain string for
+                # CallToolResult.content instead of the spec-required list.
+                # Extract a useful message and surface it to the agent.
+                raw = str(exc)
+                # Try to pull the actual input value from the error string
+                if "input_value=" in raw:
+                    start = raw.index("input_value=") + len("input_value=")
+                    # Find the matching quote
+                    quote = raw[start]
+                    end = raw.index(quote, start + 1) + 1
+                    text = raw[start + 1 : end - 1]
+                else:
+                    text = raw
+                logger.warning(
+                    "MCP server returned malformed content — wrapping as text: %s", text
+                )
+                return MCPToolResult(
+                    status="success",
+                    toolUseId=tool_use_id,
+                    content=[{"text": text}],
+                )
+            raise
 
 
 def create_mcp_client(mcp_url: str, auth: dict | None = None) -> ReconnectingMCPClient:

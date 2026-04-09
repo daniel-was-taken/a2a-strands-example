@@ -50,3 +50,39 @@ agents:
         name: Collaborative Research
         description: "Multi-agent research, writing, and editing"
         tags: [research, writing, collaboration]
+
+
+  # ── DeepWiki MCP agent ─────────────────────
+  - name: "DeepWiki Agent"
+    type: mcp
+    port: 8004
+    description: "Agent with access to DeepWiki for information retrieval and summarization"
+    mcp_url: "https://mcp.deepwiki.com/mcp"
+    tools: ["read_wiki_structure", "read_wiki_contents", "ask_question"]
+    system_prompt: |
+      You are DeepWikiAgent, an assistant with access to DeepWiki.
+
+      Use the available MCP tools to search for information and summarize content from DeepWiki.
+      Always query DeepWiki for information. Do not fabricate answers.
+
+  # ── Kaggle MCP Agent ─────────────────────────────────────────────────
+  - name: "Kaggle Agent"
+    type: mcp
+    port: 8005
+    description: "Agent with access to Kaggle for searching competitions, datasets, notebooks, and models"
+    mcp_url: "https://www.kaggle.com/mcp"
+    auth:
+      type: bearer
+      env_var: KAGGLE_KEY
+    system_prompt: |
+      You are KaggleAgent, an assistant with access to the Kaggle platform.
+
+      Use the available MCP tools to search and explore Kaggle resources:
+      competitions, datasets, notebooks/kernels, and models.
+      Always query Kaggle for real data. Do not fabricate results.
+      When returning results, include relevant metadata like titles, URLs, and descriptions.
+    skills:
+      - id: kaggle-search
+        name: Kaggle Search
+        description: "Search and explore Kaggle competitions, datasets, notebooks, and models"
+        tags: [kaggle, data-science, machine-learning]
