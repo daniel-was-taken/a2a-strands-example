@@ -1,19 +1,21 @@
-"""Shared helpers to create and serve MCP-backed Strands agents as A2A servers.
+"""Shared helpers to create and serve configured Strands agents as A2A servers.
 
-Combines the generic serve_agent() helper with the MCP agent factory so that
-specialist agents can be declared entirely in agents.yaml and launched with::
+The same module can launch any agent declared in ``agents.yaml``:
 
-    python -m core.server --config agents.yaml --agent "Database Reader"
+    python -m core.server --config agents.yaml --agent "Database Agent"
+    python -m core.server --config agents.yaml --agent "Graph Reviewer"
 
 Or imported programmatically::
 
-    from core.server import serve_agent, create_mcp_agent, serve_mcp_agent
+    from core.server import serve_agent, serve_configured_agent
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import logging
+from typing import Any
 
 import uvicorn
 import yaml
@@ -60,10 +62,23 @@ def create_mcp_agent(agent_config: dict) -> Agent:
     )
 
 
+def create_custom_agent(agent_config: dict) -> Any:
+    """Create a custom agent from a Python module and factory function."""
+    module_name = agent_config["module"]
+    factory_name = agent_config["factory"]
+    module = importlib.import_module(module_name)
+    factory = getattr(module, factory_name)
+    return factory()
+
+
+def _build_skills(agent_config: dict) -> list[AgentSkill]:
+    return [AgentSkill(**skill) for skill in agent_config.get("skills", [])]
+
+
 def serve_mcp_agent(agent_config: dict) -> None:
     """Create and serve an MCP-backed agent as an A2A server."""
     agent = create_mcp_agent(agent_config)
-    skills = [AgentSkill(**s) for s in agent_config.get("skills", [])]
+    skills = _build_skills(agent_config)
 
     serve_agent(
         agent,
@@ -71,6 +86,31 @@ def serve_mcp_agent(agent_config: dict) -> None:
         port=agent_config["port"],
         skills=skills,
     )
+
+
+def serve_custom_agent(agent_config: dict) -> None:
+    """Create and serve a custom agent declared in agents.yaml."""
+    agent = create_custom_agent(agent_config)
+    skills = _build_skills(agent_config)
+
+    serve_agent(
+        agent,
+        name=agent_config["name"],
+        port=agent_config["port"],
+        skills=skills,
+    )
+
+
+def serve_configured_agent(agent_config: dict) -> None:
+    """Serve a configured agent regardless of whether it is MCP-backed or custom."""
+    agent_type = agent_config["type"]
+    if agent_type == "mcp":
+        serve_mcp_agent(agent_config)
+        return
+    if agent_type == "custom":
+        serve_custom_agent(agent_config)
+        return
+    raise ValueError(f"Unsupported agent type: {agent_type}")
 
 
 def serve_agent(
@@ -85,7 +125,7 @@ def serve_agent(
     """Start a Strands agent as an A2A server with auth, CORS, and structured logging.
 
     Args:
-        agent: A Strands Agent (or Graph) instance.
+        agent: A Strands Agent, Graph, or Swarm instance.
         name: Display name used in logs and AgentCard.
         port: TCP port to bind.
         http_url: Public URL advertised in the AgentCard (optional).
@@ -130,7 +170,5 @@ if __name__ == "__main__":
     agent_cfg = next((a for a in agents if a["name"] == args.agent), None)
     if agent_cfg is None:
         raise SystemExit(f"Agent '{args.agent}' not found in {args.config}")
-    if agent_cfg["type"] != "mcp":
-        raise SystemExit(f"Agent '{args.agent}' is type '{agent_cfg['type']}', not 'mcp'")
 
-    serve_mcp_agent(agent_cfg)
+    serve_configured_agent(agent_cfg)

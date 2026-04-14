@@ -105,24 +105,22 @@ def main():
     agent_ports: list[int] = []
 
     for cfg in agents_config:
-        if cfg["type"] == "mcp":
-            cmd = [
-                python,
-                "-m",
-                "core.server",
-                "--config",
-                config_path,
-                "--agent",
-                cfg["name"],
-            ]
-        elif cfg["type"] == "custom":
-            cmd = [python, "-m", cfg["module"]]
-        else:
+        if cfg["type"] not in {"mcp", "custom"}:
             print(
                 f"  WARNING: Unknown agent type '{cfg['type']}' for {cfg['name']}, skipping.",
                 file=sys.stderr,
             )
             continue
+
+        cmd = [
+            python,
+            "-m",
+            "core.server",
+            "--config",
+            config_path,
+            "--agent",
+            cfg["name"],
+        ]
 
         agent_procs.append(subprocess.Popen(cmd))
         agent_names.append(cfg["name"])

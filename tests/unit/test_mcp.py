@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -110,6 +111,63 @@ def test_load_agents_config_reads_yaml(tmp_path):
     agents = load_agents_config(str(config_path))
     assert len(agents) == 1
     assert agents[0]["name"] == "A1"
+
+
+def test_create_custom_agent_calls_configured_factory():
+    """create_custom_agent should import the configured module and call its factory."""
+    custom_agent = MagicMock()
+    factory = MagicMock(return_value=custom_agent)
+    module = SimpleNamespace(create_agent=factory)
+    config = {
+        "name": "Custom Agent",
+        "type": "custom",
+        "module": "agents.custom_agent",
+        "factory": "create_agent",
+    }
+
+    with patch("core.server.importlib.import_module", return_value=module) as mock_import:
+        from core.server import create_custom_agent
+
+        result = create_custom_agent(config)
+
+    assert result is custom_agent
+    mock_import.assert_called_once_with("agents.custom_agent")
+    factory.assert_called_once_with()
+
+
+def test_serve_configured_custom_agent_uses_yaml_definition():
+    """serve_configured_agent should launch custom agents from agents.yaml metadata."""
+    custom_agent = MagicMock()
+    config = {
+        "name": "Custom Agent",
+        "type": "custom",
+        "port": 9002,
+        "module": "agents.custom_agent",
+        "factory": "create_agent",
+        "skills": [
+            {
+                "id": "custom-skill",
+                "name": "Custom Skill",
+                "description": "Handles custom workflows",
+                "tags": ["custom"],
+            }
+        ],
+    }
+
+    with (
+        patch("core.server.create_custom_agent", return_value=custom_agent) as mock_create,
+        patch("core.server.serve_agent") as mock_serve,
+    ):
+        from core.server import serve_configured_agent
+
+        serve_configured_agent(config)
+
+    mock_create.assert_called_once_with(config)
+    mock_serve.assert_called_once()
+    call_kwargs = mock_serve.call_args.kwargs
+    assert call_kwargs["name"] == "Custom Agent"
+    assert call_kwargs["port"] == 9002
+    assert call_kwargs["skills"][0].id == "custom-skill"
 
 
 # ── MCP Client ───────────────────────────────────────────────────────────────

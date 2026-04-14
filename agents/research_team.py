@@ -13,7 +13,7 @@ from a2a.types import AgentSkill
 from strands import Agent
 from strands.multiagent import Swarm
 
-from core.model import create_model
+from core.model import create_toolless_model
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ _SKILLS = [
 
 def create_agent() -> Swarm:
     """Build a swarm with researcher, writer, and editor agents."""
-    model = create_model()
+    model = create_toolless_model()
 
     researcher = Agent(
         model=model,
@@ -39,6 +39,8 @@ def create_agent() -> Swarm:
             "When you have enough material, hand off to the 'writer' agent."
         ),
         description="Researches topics and gathers information",
+        tools=[],
+        load_tools_from_directory=False,
         callback_handler=None,
     )
     writer = Agent(
@@ -51,6 +53,8 @@ def create_agent() -> Swarm:
             "If you need more research, hand off to the 'researcher' agent."
         ),
         description="Writes clear content from research",
+        tools=[],
+        load_tools_from_directory=False,
         callback_handler=None,
     )
     editor = Agent(
@@ -62,6 +66,8 @@ def create_agent() -> Swarm:
             "If the content is good, produce the final version and stop."
         ),
         description="Edits and polishes written content",
+        tools=[],
+        load_tools_from_directory=False,
         callback_handler=None,
     )
 

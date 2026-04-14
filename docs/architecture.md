@@ -1,194 +1,156 @@
 # Architecture
 
-## System Architecture
+## System Overview
 
 ```mermaid
 graph TB
     User([User / Browser])
 
-    subgraph Orchestrator ["Orchestrator (FastAPI :8000)"]
-        FE[Frontend<br/>HTML/CSS/JS]
-        API[REST API<br/>/conversations/*]
-        Safety[Safety Reviewer<br/>LLM-based]
-        Store[(ConversationStore<br/>In-Memory / Postgres)]
-        Router[Agent Router<br/>A2AClientToolProvider]
+    subgraph Orchestrator ["Orchestrator :8000"]
+        FE[Frontend]
+        API[Conversation API]
+        Safety[Safety Review]
+        Store[(Conversation Store)]
+        Router[A2A Router]
     end
 
-    subgraph Agents ["Specialist Agents (from agents.yaml)"]
-        direction TB
-        DB[Database Agent<br/>:8001 &bull; MCP]
-        GR[Graph Reviewer<br/>:8002 &bull; Custom]
-        RT[Research Team<br/>:8003 &bull; Custom]
+    subgraph Agents ["Configured Agents"]
+        DB[Database Agent :8001]
+        GR[Graph Reviewer :8002]
+        RT[Research Team :8003]
+        BRD[BRD Specialist :8004]
     end
 
-    subgraph MCP_Servers ["MCP Servers"]
-        Neon[Neon MCP<br/>mcp.neon.tech]
+    subgraph External ["External Systems"]
+        MCP[MCP Server]
+        LLM[Gemini]
     end
 
-    subgraph Graph ["Graph Reviewer Internals"]
-        direction LR
-        Analyze[Analyze] --> Implement[Implement] --> Review[Review]
-        Review -->|needs revision| Implement
-    end
-
-    subgraph Swarm ["Research Team Internals"]
-        direction LR
-        Researcher[Researcher] <-->|handoff| Writer[Writer] <-->|handoff| Editor[Editor]
-    end
-
-    User -->|HTTP| FE
-    User -->|REST / curl| API
-    API --> Safety
-    Safety -->|APPROVE / REJECT| Store
+    User --> FE
+    User --> API
     API --> Store
+    API --> Safety
     API --> Router
-    Router -->|A2A Protocol| DB
-    Router -->|A2A Protocol| GR
-    Router -->|A2A Protocol| RT
-    DB -->|MCP Protocol| Neon
-    GR --- Graph
-    RT --- Swarm
-
-    classDef framework fill:#e8f0fe,stroke:#4285f4,color:#1a1a1a
-    classDef agent fill:#e6f4ea,stroke:#34a853,color:#1a1a1a
-    classDef external fill:#fef7e0,stroke:#fbbc04,color:#1a1a1a
-    classDef user fill:#fce8e6,stroke:#ea4335,color:#1a1a1a
-
-    class User user
-    class FE,API,Safety,Store,Router framework
-    class DB,GR,RT agent
-    class Neon external
+    Router --> DB
+    Router --> GR
+    Router --> RT
+    Router --> BRD
+    DB --> MCP
+    Orchestrator --> LLM
+    GR --> LLM
+    RT --> LLM
+    BRD --> LLM
 ```
 
-## Component Diagram
+## Framework Boundary
 
 ```mermaid
 graph LR
-    subgraph core ["core/ (Framework)"]
-        config[config.py<br/>Pydantic Settings]
-        model[model.py<br/>Gemini Model Factory]
-        server[server.py<br/>serve_agent &bull; create_mcp_agent<br/>load_agents_config]
-        mcp[mcp.py<br/>ReconnectingMCPClient]
-        orch[orchestrator.py<br/>FastAPI App]
-        safety[safety.py<br/>Safety Reviewer]
-        schemas[schemas.py<br/>Conversation &bull; Message]
-        store[store.py<br/>ConversationStore]
-        auth[auth.py<br/>AgentAuthMiddleware]
-        logging_mod[logging.py<br/>Structured JSON]
-        tracing[tracing.py<br/>OpenTelemetry]
-        task_store[task_store.py<br/>A2A TaskStore]
-        log_stream[log_stream.py<br/>SSE Broadcaster]
+    subgraph Core ["core/"]
+        Orch[orchestrator.py]
+        Server[server.py]
+        Config[config.py]
+        Schemas[schemas.py]
+        Store[store.py]
+        Safety[safety.py]
+        MCPClient[mcp.py]
     end
 
-    subgraph agents ["agents/ (User Agents)"]
-        graph_rev[graph_reviewer.py]
-        research[research_team.py]
+    subgraph Agents ["agents/"]
+        Graph[graph_reviewer.py]
+        BRDAgent[brd_specialist.py]
+        Research[research_team.py]
     end
 
-    subgraph ext ["External"]
-        yaml[(agents.yaml)]
-        env[(.env)]
-        gemini[Gemini API]
-        mcp_srv[MCP Servers]
-    end
-
-    config --> model
-    config --> server
-    config --> orch
-    model --> server
-    model --> orch
-    model --> safety
-    mcp --> server
-    server --> auth
-    server --> logging_mod
-    server --> tracing
-    server --> task_store
-    orch --> safety
-    orch --> store
-    orch --> schemas
-    orch --> log_stream
-    orch --> server
-    store --> schemas
-
-    graph_rev --> model
-    graph_rev --> server
-    research --> model
-    research --> server
-
-    yaml --> server
-    env --> config
-    model --> gemini
-    mcp --> mcp_srv
-
-    classDef fw fill:#e8f0fe,stroke:#4285f4,color:#1a1a1a
-    classDef usr fill:#e6f4ea,stroke:#34a853,color:#1a1a1a
-    classDef ext_cls fill:#fef7e0,stroke:#fbbc04,color:#1a1a1a
-
-    class config,model,server,mcp,orch,safety,schemas,store,auth,logging_mod,tracing,task_store,log_stream fw
-    class graph_rev,research usr
-    class yaml,env,gemini,mcp_srv ext_cls
+    YAML[(agents.yaml)] --> Server
+    Config --> Orch
+    Config --> Server
+    Schemas --> Orch
+    Store --> Orch
+    Safety --> Orch
+    MCPClient --> Server
+    Server --> Graph
+    Server --> BRDAgent
+    Server --> Research
 ```
 
-## Data Flow: Normal Query
+## Startup Model
+
+- `run_system.py` reads `agents.yaml`
+- every configured agent is started through `core.server`
+- `core.server` supports both `mcp` and `custom` agent entries
+- the orchestrator builds its routing prompt from the same `agents.yaml`
+
+That means `agents.yaml` is the effective runtime contract for local startup and direct agent
+launches.
+
+## Standard Request Flow
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant FE as Frontend
     participant Orch as Orchestrator
-    participant Store as ConversationStore
-    participant Router as Agent Router
-    participant Agent as Database Agent
-    participant MCP as Neon MCP
+    participant Store as Conversation Store
+    participant Agent as Specialist Agent
 
-    User->>FE: Type message
-    FE->>Orch: POST /conversations/{id}/messages
-    Orch->>Store: Load conversation (last 20 messages)
-    Orch->>Orch: Check for destructive keywords
-    Note over Orch: No destructive keywords found
-    Orch->>Router: Route to specialist agent
-    Router->>Agent: A2A message/send
-    Agent->>MCP: MCP tool call (run_sql)
-    MCP-->>Agent: SQL result
-    Agent-->>Router: A2A response
-    Router-->>Orch: Agent response
-    Orch->>Store: Save message + response
-    Orch-->>FE: JSON response
-    FE-->>User: Display result
+    User->>Orch: POST /conversations/{id}/messages
+    Orch->>Store: load conversation context
+    Orch->>Orch: rebuild prompt from recent messages
+    Orch->>Agent: route over A2A
+    Agent-->>Orch: result
+    Orch->>Store: save agent reply and events
+    Orch-->>User: updated conversation
 ```
 
-## Data Flow: Destructive Query (Safety Review)
+## Destructive Request Flow
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant FE as Frontend
     participant Orch as Orchestrator
     participant Safety as Safety Reviewer
-    participant Store as ConversationStore
+    participant Store as Conversation Store
     participant Agent as Database Agent
-    participant MCP as Neon MCP
 
-    User->>FE: "Delete employee with id 5"
-    FE->>Orch: POST /conversations/{id}/messages
-    Orch->>Orch: Detects "delete" keyword
-    Orch->>Safety: Review destructive query
-    Safety-->>Orch: REJECT / APPROVE
-
-    alt Safety REJECTS
-        Orch->>Store: Set status = awaiting_approval
-        Orch-->>FE: 200 (awaiting_approval)
-        FE-->>User: Show approve/reject buttons
-        User->>FE: Click Approve
-        FE->>Orch: POST /conversations/{id}/approve
-        Orch->>Store: Set status = active
-    end
-
-    Orch->>Agent: A2A message/send
-    Agent->>MCP: MCP tool call (run_sql DELETE)
-    MCP-->>Agent: Result
-    Agent-->>Orch: Response
-    Orch->>Store: Save messages
-    Orch-->>FE: JSON response
-    FE-->>User: Display result
+    User->>Orch: destructive request
+    Orch->>Safety: review request
+    Safety-->>Orch: approve or reject recommendation
+    Orch->>Store: set awaiting_approval
+    User->>Orch: approve
+    Orch->>Agent: execute request
+    Agent-->>Orch: result
+    Orch->>Store: clear approval fields
+    Orch-->>User: updated conversation
 ```
+
+## Fetch-to-BRD Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Orch as Orchestrator
+    participant DB as Database Agent
+    participant BRD as BRD Specialist
+    participant Review as Graph Reviewer
+    participant Store as Conversation Store
+
+    User->>Orch: "Fetch records and create a BRD"
+    Orch->>DB: fetch evidence summary
+    DB-->>Orch: structured evidence summary
+    Orch->>Store: save evidence_summary
+    Orch-->>User: status = awaiting_brd_confirmation
+    User->>Orch: confirm evidence
+    Orch->>BRD: draft BRD from evidence
+    BRD-->>Orch: draft BRD
+    Orch->>Review: review and improve draft
+    Review-->>Orch: final BRD
+    Orch->>Store: clear temporary BRD fields
+    Orch-->>User: final BRD response
+```
+
+## Key Design Choices
+
+- Conversation context is rebuilt per turn to avoid cross-conversation leakage.
+- Approval and evidence confirmation are separate states because they solve different risks.
+- Custom and MCP agents share one startup path so the framework stays configuration-driven.
+- The BRD flow is staged to keep facts and assumptions separated.

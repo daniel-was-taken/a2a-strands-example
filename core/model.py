@@ -1,12 +1,24 @@
-"""Shared model configuration for all Strands agents.
+"""Shared Gemini model helpers for Strands agents."""
 
-Uses centralised settings from ``common.config``.
-Set GOOGLE_API_KEY for local dev, or use Vertex AI on GCP (ADC auto-detected).
-"""
-
+from google import genai
 from strands.models.gemini import GeminiModel
+from strands.types.tools import ToolSpec
 
 from core.config import settings
+
+
+class NoToolsGeminiModel(GeminiModel):
+    """Gemini model variant that omits empty tool declarations.
+
+    Some tool-free agents fail when Gemini receives an empty
+    ``Tool(function_declarations=[])`` payload. This model suppresses that
+    payload entirely when there are no tools configured.
+    """
+
+    def _format_request_tools(self, tool_specs: list[ToolSpec] | None) -> list[genai.types.Tool]:
+        if not tool_specs and not self.config.get("gemini_tools"):
+            return []
+        return super()._format_request_tools(tool_specs)
 
 
 def create_model() -> GeminiModel:
@@ -28,4 +40,13 @@ def create_model() -> GeminiModel:
             "location": settings.google_cloud_location,
         },
         model_id=settings.gemini_model_id,
+    )
+
+
+def create_toolless_model() -> NoToolsGeminiModel:
+    """Create a Gemini model for agents that should not advertise tools."""
+    base = create_model()
+    return NoToolsGeminiModel(
+        client_args=base.client_args,
+        model_id=base.config["model_id"],
     )

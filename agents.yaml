@@ -38,6 +38,19 @@ agents:
         description: "Structured graph workflow with automatic revision cycles"
         tags: [reasoning, analysis, review]
 
+  # ── BRD agent (document generation workflow) ─────────────────────────────
+  - name: "BRD Specialist"
+    type: custom
+    port: 8004
+    description: "Creates structured business requirements documents from confirmed evidence summaries"
+    module: "agents.brd_specialist"
+    factory: "create_agent"
+    skills:
+      - id: brd-generation
+        name: BRD Generation
+        description: "Creates business requirements documents from structured evidence"
+        tags: [brd, requirements, documentation]
+
   # ── Swarm agent (autonomous team) ─────────────────────────────────────────
   - name: "Research Team"
     type: custom

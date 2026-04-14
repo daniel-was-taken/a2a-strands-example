@@ -11,7 +11,7 @@ import pytest
 
 
 class TestInMemoryA2ATaskStore:
-    def _make_task(self, task_id: str):
+    def _create_test_task(self, task_id: str):
         from a2a.types import Task, TaskState, TaskStatus
 
         return Task(
@@ -24,7 +24,7 @@ class TestInMemoryA2ATaskStore:
         from core.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
-        task = self._make_task("t1")
+        task = self._create_test_task("t1")
         await store.save(task)
         assert await store.get("t1") is not None
         assert (await store.get("t1")).id == "t1"
@@ -39,7 +39,7 @@ class TestInMemoryA2ATaskStore:
         from core.task_store import InMemoryA2ATaskStore
 
         store = InMemoryA2ATaskStore()
-        task = self._make_task("t2")
+        task = self._create_test_task("t2")
         await store.save(task)
         await store.delete("t2")
         assert await store.get("t2") is None
@@ -58,12 +58,12 @@ class TestInMemoryA2ATaskStore:
 
         store = InMemoryA2ATaskStore()
 
-        async def _save_many(prefix: str) -> None:
+        async def _save_tasks_with_prefix(prefix: str) -> None:
             for i in range(50):
-                task = self._make_task(f"{prefix}-{i}")
+                task = self._create_test_task(f"{prefix}-{i}")
                 await store.save(task)
 
-        await asyncio.gather(*[_save_many(f"t{n}") for n in range(4)])
+        await asyncio.gather(*[_save_tasks_with_prefix(f"t{n}") for n in range(4)])
 
         assert len(store._tasks) == 200  # 4 coroutines × 50 tasks
 

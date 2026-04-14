@@ -1,6 +1,8 @@
 # tests/test_orchestrator.py
 """Tests for the orchestrator conversation lifecycle."""
 
+from unittest.mock import AsyncMock
+
 
 # ── Conversation CRUD ──────────────────────────────────────────────────────
 
@@ -124,6 +126,85 @@ def test_send_message_to_awaiting_returns_409(client_approve):
     )
     resp = client_approve.post(f"/conversations/{conv_id}/messages", json={"content": "hello"})
     assert resp.status_code == 409
+
+
+def test_fetch_and_brd_request_pauses_for_confirmation(client, monkeypatch):
+    import core.orchestrator as orch
+
+    monkeypatch.setattr(orch.settings, "database_mode", "a2a")
+    monkeypatch.setattr(
+        orch,
+        "_run_orchestrator_prompt",
+        AsyncMock(return_value="1. Data Source\n2. Filters Applied\n7. Evidence Summary"),
+    )
+
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    resp = client.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "Fetch records and create a BRD for onboarding issues"},
+    )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "awaiting_brd_confirmation"
+    assert data["pending_brd_request"] == "Fetch records and create a BRD for onboarding issues"
+    assert data["evidence_summary"] == "1. Data Source\n2. Filters Applied\n7. Evidence Summary"
+    assert data["messages"][-1]["content"] == "1. Data Source\n2. Filters Applied\n7. Evidence Summary"
+
+
+def test_confirm_evidence_generates_brd(client, monkeypatch):
+    import core.orchestrator as orch
+
+    monkeypatch.setattr(orch.settings, "database_mode", "a2a")
+    monkeypatch.setattr(
+        orch,
+        "_run_orchestrator_prompt",
+        AsyncMock(side_effect=["Evidence summary", "1. Problem Statement\n2. Scope and Exclusions"]),
+    )
+
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "Fetch records and create a BRD for onboarding issues"},
+    )
+
+    resp = client.post(f"/conversations/{conv_id}/confirm-evidence")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "active"
+    assert data["pending_brd_request"] is None
+    assert data["evidence_summary"] is None
+    assert data["messages"][-1]["content"] == "1. Problem Statement\n2. Scope and Exclusions"
+
+
+def test_reject_evidence_clears_brd_workflow(client, monkeypatch):
+    import core.orchestrator as orch
+
+    monkeypatch.setattr(orch.settings, "database_mode", "a2a")
+    monkeypatch.setattr(
+        orch,
+        "_run_orchestrator_prompt",
+        AsyncMock(return_value="Evidence summary"),
+    )
+
+    create_resp = client.post("/conversations")
+    conv_id = create_resp.json()["id"]
+    client.post(
+        f"/conversations/{conv_id}/messages",
+        json={"content": "Fetch records and create a BRD for onboarding issues"},
+    )
+
+    resp = client.post(f"/conversations/{conv_id}/reject-evidence")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "active"
+    assert data["pending_brd_request"] is None
+    assert data["evidence_summary"] is None
+    assert data["messages"][-1]["content"] == (
+        "BRD generation cancelled. Update the request and try again when you're ready."
+    )
 
 
 def test_multi_turn_conversation(client):

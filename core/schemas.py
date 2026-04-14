@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class ConversationStatus(StrEnum):
     ACTIVE = "active"
     AWAITING_APPROVAL = "awaiting_approval"
+    AWAITING_BRD_CONFIRMATION = "awaiting_brd_confirmation"
 
 
 class ActivityEvent(BaseModel):
@@ -41,6 +42,8 @@ class Conversation(BaseModel):
     review_verdict: str | None = None
     review_recommended_reject: bool = False
     pending_query: str | None = None
+    pending_brd_request: str | None = None
+    evidence_summary: str | None = None
     messages: list[Message] = Field(default_factory=list)
     events: list[ActivityEvent] = Field(default_factory=list)
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())

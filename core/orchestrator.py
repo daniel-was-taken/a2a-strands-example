@@ -44,6 +44,11 @@ from core.store import conversation_store
 logger = logging.getLogger(__name__)
 
 DESTRUCTIVE_KEYWORDS = {"delete", "remove", "drop", "truncate", "destroy"}
+FETCH_KEYWORDS = ("fetch", "record", "records", "data", "database", "query")
+BRD_KEYWORDS = ("brd", "business requirements document")
+DATABASE_AGENT_NAME = "Database Agent"
+BRD_SPECIALIST_NAME = "BRD Specialist"
+GRAPH_REVIEWER_NAME = "Graph Reviewer"
 
 MAX_THREAD_MESSAGES = 20
 
@@ -95,6 +100,7 @@ Keep responses clear and relay the results back accurately.
 # ── Lazy-loaded agent singleton ──────────────────────────────────────
 
 _agent_lock = threading.Lock()
+_agent_execution_lock = threading.Lock()
 _agent: Agent | None = None
 
 
@@ -207,6 +213,15 @@ def _clear_approval(conversation_id: str) -> None:
     )
 
 
+def _clear_brd_workflow(conversation_id: str) -> None:
+    conversation_store.update(
+        conversation_id,
+        status=ConversationStatus.ACTIVE,
+        pending_brd_request=None,
+        evidence_summary=None,
+    )
+
+
 def _add_event(conversation_id: str, agent: str, action: str, detail: str = "") -> None:
     conversation_store.add_event(
         conversation_id,
@@ -234,17 +249,120 @@ def _extract_routed_agents(agent: Agent) -> list[str]:
     return agents_used
 
 
+def _get_target_agent_url(agent_name: str) -> str:
+    agents_config = _load_agents_config()
+    for cfg in agents_config:
+        if cfg["name"] == agent_name:
+            return _agent_url(cfg)
+    raise RuntimeError(f"Agent '{agent_name}' not found in config")
+
+
+def _should_start_brd_workflow(user_input: str) -> bool:
+    if settings.database_mode != "a2a":
+        return False
+
+    lower_input = user_input.lower()
+    has_brd_keyword = any(keyword in lower_input for keyword in BRD_KEYWORDS)
+    has_fetch_keyword = any(keyword in lower_input for keyword in FETCH_KEYWORDS)
+    return has_brd_keyword and has_fetch_keyword
+
+
+def _build_fetch_summary_prompt(user_request: str) -> str:
+    database_agent_url = _get_target_agent_url(DATABASE_AGENT_NAME)
+    return f"""You are coordinating the first stage of a fetch-to-BRD workflow.
+
+Use ONLY the Database Agent with this exact target_agent_url:
+{database_agent_url}
+
+User request:
+{user_request}
+
+Do not write the BRD yet.
+Return a structured evidence summary with these exact headings:
+1. Data Source
+2. Filters Applied
+3. Row Count
+4. Key Findings
+5. Notable Anomalies
+6. Missing Data
+7. Evidence Summary
+"""
+
+
+def _build_brd_prompt(user_request: str, evidence_summary: str) -> str:
+    brd_specialist_url = _get_target_agent_url(BRD_SPECIALIST_NAME)
+    graph_reviewer_url = _get_target_agent_url(GRAPH_REVIEWER_NAME)
+    return f"""You are coordinating the second stage of a fetch-to-BRD workflow.
+
+First, use ONLY the BRD Specialist with this exact target_agent_url:
+{brd_specialist_url}
+
+Then, send the draft to the Graph Reviewer with this exact target_agent_url:
+{graph_reviewer_url}
+
+Return only the final revised BRD.
+
+Original user request:
+{user_request}
+
+Confirmed evidence summary:
+{evidence_summary}
+
+Requirements for the final BRD:
+- Audience: mixed audience.
+- Separate facts from assumptions.
+- Avoid unsupported claims.
+- Cite the evidence summary or source-record appendix.
+- Highlight missing data explicitly.
+- Ask follow-up questions when the evidence is insufficient.
+
+Use these exact section headings:
+1. Problem Statement
+2. Scope and Exclusions
+3. Functional Requirements
+4. Assumptions and Constraints
+5. Risks and Open Questions
+"""
+
+
+def _invoke_agent(prompt: str) -> tuple[str, list[str]]:
+    agent = _get_agent()
+    with _agent_execution_lock:
+        agent.messages = []
+        result = agent(prompt)
+        response = str(result)
+        routed_agents = _extract_routed_agents(agent)
+    return response, routed_agents
+
+
+async def _run_orchestrator_prompt(
+    conversation_id: str,
+    prompt: str,
+    forwarding_detail: str,
+    completion_detail: str,
+) -> str:
+    _add_event(conversation_id, "orchestrator", "forwarding", forwarding_detail)
+    response, routed_agents = await asyncio.to_thread(_invoke_agent, prompt)
+
+    for name in routed_agents:
+        _add_event(
+            conversation_id,
+            name.lower().replace(" ", "_"),
+            "executed",
+            f"Handled by {name}",
+        )
+
+    _add_event(conversation_id, "orchestrator", "completed", completion_detail)
+    return response
+
+
 async def _execute_message(conversation_id: str) -> Conversation:
     """Reset agent context, rebuild from conversation messages, execute, store response."""
     conv = conversation_store.get(conversation_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    _add_event(conversation_id, "orchestrator", "forwarding", "Routing to specialist agent")
     try:
-        agent = _get_agent()
-        agent.messages = []  # Clean slate — no cross-conversation leakage
-
         recent = conv.messages[-MAX_THREAD_MESSAGES:]
         if len(recent) <= 1:
             prompt = recent[0].content
@@ -255,19 +373,12 @@ async def _execute_message(conversation_id: str) -> Conversation:
                 context_parts.append(f"{label}: {msg.content}")
             prompt = "Previous conversation:\n" + "\n".join(context_parts)
 
-        result = await asyncio.to_thread(agent, prompt)
-        response = str(result)
-
-        routed = _extract_routed_agents(agent)
-        for name in routed:
-            _add_event(
-                conversation_id,
-                name.lower().replace(" ", "_"),
-                "executed",
-                f"Handled by {name}",
-            )
-
-        _add_event(conversation_id, "orchestrator", "completed", "Message processed successfully")
+        response = await _run_orchestrator_prompt(
+            conversation_id,
+            prompt,
+            "Routing to specialist agent",
+            "Message processed successfully",
+        )
         conversation_store.add_message(conversation_id, Message(role="agent", content=response))
         return conversation_store.get(conversation_id)  # type: ignore[return-value]
     except Exception:
@@ -353,6 +464,8 @@ async def send_message(conversation_id: str, payload: MessageRequest) -> Convers
         raise HTTPException(status_code=404, detail="Conversation not found")
     if conv.status == ConversationStatus.AWAITING_APPROVAL:
         raise HTTPException(status_code=409, detail="Conversation is awaiting approval")
+    if conv.status == ConversationStatus.AWAITING_BRD_CONFIRMATION:
+        raise HTTPException(status_code=409, detail="Conversation is awaiting BRD confirmation")
 
     content = payload.content
     conversation_store.add_message(conversation_id, Message(role="user", content=content))
@@ -396,7 +509,108 @@ async def send_message(conversation_id: str, payload: MessageRequest) -> Convers
 
         return conversation_store.get(conversation_id)  # type: ignore[return-value]
 
+    if _should_start_brd_workflow(content):
+        try:
+            evidence_summary = await _run_orchestrator_prompt(
+                conversation_id,
+                _build_fetch_summary_prompt(content),
+                "Fetching records for BRD workflow",
+                "Evidence summary ready for review",
+            )
+            conversation_store.add_message(
+                conversation_id,
+                Message(role="agent", content=evidence_summary),
+            )
+            conversation_store.update(
+                conversation_id,
+                status=ConversationStatus.AWAITING_BRD_CONFIRMATION,
+                pending_brd_request=content,
+                evidence_summary=evidence_summary,
+            )
+            _add_event(
+                conversation_id,
+                "orchestrator",
+                "awaiting_confirmation",
+                "Waiting for human confirmation before BRD drafting",
+            )
+            return conversation_store.get(conversation_id)  # type: ignore[return-value]
+        except Exception:
+            logger.exception("BRD evidence fetch failed for conversation %s", conversation_id)
+            _add_event(conversation_id, "orchestrator", "failed", "Evidence fetch failed")
+            conversation_store.add_message(
+                conversation_id,
+                Message(
+                    role="agent",
+                    content="I couldn't fetch the evidence summary for the BRD workflow. Please try again.",
+                ),
+            )
+            return conversation_store.get(conversation_id)  # type: ignore[return-value]
+
     return await _execute_message(conversation_id)
+
+
+@app.post("/conversations/{conversation_id}/confirm-evidence", response_model=Conversation)
+async def confirm_evidence(conversation_id: str) -> Conversation:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.status != ConversationStatus.AWAITING_BRD_CONFIRMATION:
+        raise HTTPException(status_code=409, detail="Conversation is not awaiting BRD confirmation")
+    if not conv.pending_brd_request or not conv.evidence_summary:
+        raise HTTPException(status_code=409, detail="Conversation is missing BRD workflow data")
+
+    _add_event(conversation_id, "human", "confirmed_evidence", "Human confirmed evidence summary")
+
+    try:
+        brd_response = await _run_orchestrator_prompt(
+            conversation_id,
+            _build_brd_prompt(conv.pending_brd_request, conv.evidence_summary),
+            "Drafting BRD from confirmed evidence",
+            "BRD drafted successfully",
+        )
+        conversation_store.add_message(
+            conversation_id,
+            Message(role="agent", content=brd_response),
+        )
+        _clear_brd_workflow(conversation_id)
+        return conversation_store.get(conversation_id)  # type: ignore[return-value]
+    except Exception:
+        logger.exception("BRD drafting failed for conversation %s", conversation_id)
+        _add_event(conversation_id, "orchestrator", "failed", "BRD drafting failed")
+        conversation_store.add_message(
+            conversation_id,
+            Message(
+                role="agent",
+                content="I couldn't create the BRD from the confirmed evidence. Please try again.",
+            ),
+        )
+        _clear_brd_workflow(conversation_id)
+        return conversation_store.get(conversation_id)  # type: ignore[return-value]
+
+
+@app.post("/conversations/{conversation_id}/reject-evidence", response_model=Conversation)
+def reject_evidence(conversation_id: str) -> Conversation:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conv.status != ConversationStatus.AWAITING_BRD_CONFIRMATION:
+        raise HTTPException(status_code=409, detail="Conversation is not awaiting BRD confirmation")
+
+    _add_event(
+        conversation_id,
+        "human",
+        "rejected_evidence",
+        "Human rejected the fetched evidence summary",
+    )
+    conversation_store.add_message(
+        conversation_id,
+        Message(
+            role="agent",
+            content="BRD generation cancelled. Update the request and try again when you're ready.",
+        ),
+    )
+    _clear_brd_workflow(conversation_id)
+    return conversation_store.get(conversation_id)  # type: ignore[return-value]
 
 
 @app.post("/conversations/{conversation_id}/approve", response_model=Conversation)

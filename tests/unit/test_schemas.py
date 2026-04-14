@@ -22,6 +22,8 @@ def test_conversation_defaults():
     assert conv.review_verdict is None
     assert conv.review_recommended_reject is False
     assert conv.pending_query is None
+    assert conv.pending_brd_request is None
+    assert conv.evidence_summary is None
     assert conv.created_at  # auto-generated
     assert conv.updated_at  # auto-generated
 
@@ -71,15 +73,15 @@ def test_message_request_empty_rejected():
         MessageRequest(content="")
 
 
-def test_message_unchanged():
-    """Message model keeps role/content/timestamp fields."""
+def test_message_has_required_fields():
+    """Message model includes role, content, and auto-generated timestamp."""
     m = Message(role="user", content="test")
     assert m.role == "user"
     assert m.content == "test"
     assert m.timestamp  # auto-generated
 
 
-def test_activity_event_unchanged():
-    """ActivityEvent model stays the same."""
+def test_activity_event_has_required_fields():
+    """ActivityEvent model includes agent, action, and detail."""
     e = ActivityEvent(agent="orchestrator", action="received", detail="test")
     assert e.agent == "orchestrator"

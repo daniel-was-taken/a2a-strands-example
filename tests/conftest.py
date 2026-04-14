@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 _TEST_AGENTS_CONFIG = {
     "agents": [
         {
-            "name": "Test MCP Agent",
+            "name": "Database Agent",
             "type": "mcp",
             "port": 9001,
             "description": "Test database agent",
@@ -37,6 +37,24 @@ _TEST_AGENTS_CONFIG = {
                     "tags": ["test"],
                 }
             ],
+        },
+        {
+            "name": "BRD Specialist",
+            "type": "custom",
+            "port": 9002,
+            "description": "Test BRD specialist",
+            "module": "agents.brd_specialist",
+            "factory": "create_agent",
+            "skills": [],
+        },
+        {
+            "name": "Graph Reviewer",
+            "type": "custom",
+            "port": 9003,
+            "description": "Test graph reviewer",
+            "module": "agents.graph_reviewer",
+            "factory": "create_agent",
+            "skills": [],
         },
     ]
 }

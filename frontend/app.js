@@ -34,6 +34,8 @@ class ApiClient {
   sendMessage(id, content)  { return this._request(`/conversations/${encodeURIComponent(id)}/messages`, { method: "POST", body: JSON.stringify({ content }) }); }
   approve(id)               { return this._request(`/conversations/${encodeURIComponent(id)}/approve`, { method: "POST" }); }
   reject(id)                { return this._request(`/conversations/${encodeURIComponent(id)}/reject`, { method: "POST" }); }
+  confirmEvidence(id)       { return this._request(`/conversations/${encodeURIComponent(id)}/confirm-evidence`, { method: "POST" }); }
+  rejectEvidence(id)        { return this._request(`/conversations/${encodeURIComponent(id)}/reject-evidence`, { method: "POST" }); }
 }
 
 const api = new ApiClient();
@@ -102,7 +104,7 @@ function renderSidebar() {
         <div class="conv-item-title">${escapeHtml(c.title)}</div>
         <div class="conv-item-time">${fmtTime(c.updated_at)}</div>
       </div>
-      ${c.status === "awaiting_approval" ? '<span class="conv-item-warning" title="Awaiting approval">&#9888;</span>' : ""}
+      ${c.status !== "active" ? `<span class="conv-item-warning" title="${escapeHtml(c.status)}">&#9888;</span>` : ""}
       <button class="delete-btn" data-delete="${escapeHtml(c.id)}" title="Delete conversation">&times;</button>
     </div>
   `).join("");
@@ -188,6 +190,19 @@ function renderContent() {
       </div>`;
   }
 
+  if (c.status === "awaiting_brd_confirmation" && c.evidence_summary) {
+    html += `
+      <div class="approval-box">
+        <h3>Evidence Summary Ready</h3>
+        <p>Review the fetched evidence summary above, then confirm to draft the BRD.</p>
+        <div class="approval-verdict">${escapeHtml(c.evidence_summary)}</div>
+        <div class="approval-actions">
+          <button class="btn-approve" data-action="confirm-evidence">&#10003; Confirm &amp; Draft BRD</button>
+          <button class="btn-reject" data-action="reject-evidence">&#10007; Cancel</button>
+        </div>
+      </div>`;
+  }
+
   // Activity log
   if (c.events && c.events.length) {
     html += `
@@ -220,8 +235,15 @@ function renderContent() {
     btn.addEventListener("click", async () => {
       const action = btn.dataset.action;
       try {
-        if (action === "approve") currentConv = await api.approve(c.id);
-        else                      currentConv = await api.reject(c.id);
+        if (action === "approve") {
+          currentConv = await api.approve(c.id);
+        } else if (action === "reject") {
+          currentConv = await api.reject(c.id);
+        } else if (action === "confirm-evidence") {
+          currentConv = await api.confirmEvidence(c.id);
+        } else if (action === "reject-evidence") {
+          currentConv = await api.rejectEvidence(c.id);
+        }
         renderContent();
         updateInput();
         await fetchConversations();
@@ -250,11 +272,16 @@ function renderContent() {
 /* -- Input state ---------------------------------------------------------- */
 
 function updateInput() {
-  const awaiting = currentConv && currentConv.status === "awaiting_approval";
+  const awaiting = currentConv && (
+    currentConv.status === "awaiting_approval"
+    || currentConv.status === "awaiting_brd_confirmation"
+  );
   messageInput.disabled = awaiting || !selectedId;
   sendBtn.disabled = awaiting || !selectedId || !messageInput.value.trim();
   if (awaiting) {
-    messageInput.placeholder = "Awaiting approval...";
+    messageInput.placeholder = currentConv.status === "awaiting_brd_confirmation"
+      ? "Awaiting BRD confirmation..."
+      : "Awaiting approval...";
   } else if (!selectedId) {
     messageInput.placeholder = "Start a new chat to begin...";
   } else {

@@ -22,7 +22,8 @@ from core.schemas import ActivityEvent, Conversation, ConversationStatus, Messag
 
 _COLUMNS = (
     "id, title, status, approval_id, review_verdict, review_recommended_reject,"
-    " pending_query, messages, events, created_at, updated_at"
+    " pending_query, pending_brd_request, evidence_summary, messages, events,"
+    " created_at, updated_at"
 )
 
 _CREATE_TABLE = """\
@@ -34,6 +35,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     review_verdict             TEXT,
     review_recommended_reject  BOOLEAN NOT NULL DEFAULT FALSE,
     pending_query              TEXT,
+    pending_brd_request        TEXT,
+    evidence_summary           TEXT,
     messages                   JSONB NOT NULL DEFAULT '[]'::jsonb,
     events                     JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at                 TEXT NOT NULL,
@@ -43,7 +46,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 
 _INSERT = f"""\
 INSERT INTO conversations ({_COLUMNS})
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
 
 
@@ -71,6 +74,8 @@ def _row_to_conversation(row: dict) -> Conversation:
         review_verdict=row.get("review_verdict"),
         review_recommended_reject=row.get("review_recommended_reject", False),
         pending_query=row.get("pending_query"),
+        pending_brd_request=row.get("pending_brd_request"),
+        evidence_summary=row.get("evidence_summary"),
         messages=messages,
         events=events,
         created_at=row["created_at"],
@@ -84,6 +89,12 @@ class PostgresConversationStore:
     def __init__(self) -> None:
         with _get_conn() as conn, conn.cursor() as cur:
             cur.execute(_CREATE_TABLE)
+            cur.execute(
+                "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pending_brd_request TEXT"
+            )
+            cur.execute(
+                "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS evidence_summary TEXT"
+            )
             conn.commit()
 
     def create(self, conversation: Conversation) -> None:
@@ -98,6 +109,8 @@ class PostgresConversationStore:
                     conversation.review_verdict,
                     conversation.review_recommended_reject,
                     conversation.pending_query,
+                    conversation.pending_brd_request,
+                    conversation.evidence_summary,
                     json.dumps([m.model_dump() for m in conversation.messages]),
                     json.dumps([e.model_dump() for e in conversation.events]),
                     conversation.created_at,
