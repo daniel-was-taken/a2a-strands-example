@@ -39,6 +39,7 @@ def test_create_mcp_agent_returns_agent():
             system_prompt="You are a test agent.",
             tools=[mock_client],
             callback_handler=None,
+            load_tools_from_directory=False,
         )
 
 

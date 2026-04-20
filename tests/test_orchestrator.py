@@ -3,7 +3,6 @@
 
 from unittest.mock import AsyncMock
 
-
 # ── Conversation CRUD ──────────────────────────────────────────────────────
 
 
@@ -150,7 +149,9 @@ def test_fetch_and_brd_request_pauses_for_confirmation(client, monkeypatch):
     assert data["status"] == "awaiting_brd_confirmation"
     assert data["pending_brd_request"] == "Fetch records and create a BRD for onboarding issues"
     assert data["evidence_summary"] == "1. Data Source\n2. Filters Applied\n7. Evidence Summary"
-    assert data["messages"][-1]["content"] == "1. Data Source\n2. Filters Applied\n7. Evidence Summary"
+    assert data["messages"][-1]["content"] == (
+        "1. Data Source\n2. Filters Applied\n7. Evidence Summary"
+    )
 
 
 def test_confirm_evidence_generates_brd(client, monkeypatch):
@@ -160,7 +161,9 @@ def test_confirm_evidence_generates_brd(client, monkeypatch):
     monkeypatch.setattr(
         orch,
         "_run_orchestrator_prompt",
-        AsyncMock(side_effect=["Evidence summary", "1. Problem Statement\n2. Scope and Exclusions"]),
+        AsyncMock(
+            side_effect=["Evidence summary", "1. Problem Statement\n2. Scope and Exclusions"]
+        ),
     )
 
     create_resp = client.post("/conversations")
