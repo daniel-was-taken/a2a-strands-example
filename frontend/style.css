@@ -71,6 +71,7 @@ body {
   gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #eef2ff 0%, var(--white) 100%);
 }
 
 .sidebar-title {
@@ -94,10 +95,10 @@ body {
 .new-chat-btn {
   width: 100%;
   padding: 8px 12px;
-  border: 1px dashed var(--border);
+  border: 1px solid var(--primary);
   border-radius: var(--radius);
-  background: none;
-  color: var(--text-muted);
+  background: var(--primary);
+  color: #fff;
   font: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -106,9 +107,9 @@ body {
 }
 
 .new-chat-btn:hover {
-  background: var(--bg);
-  border-color: var(--primary);
-  color: var(--primary);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: #fff;
 }
 
 .sidebar-content {
@@ -234,20 +235,48 @@ body {
 }
 
 .welcome-icon {
-  width: 48px;
-  height: 48px;
-  margin-bottom: 12px;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 16px;
+  color: var(--primary);
+  opacity: .7;
 }
 
 .welcome h2 {
-  font-size: 18px;
-  color: var(--text-muted);
-  font-weight: 500;
+  font-size: 22px;
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: -.01em;
 }
 
 .welcome p {
   font-size: 14px;
-  margin-top: 4px;
+  margin-top: 6px;
+  color: var(--text-muted);
+}
+
+.welcome-hints {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.welcome-hint {
+  display: inline-block;
+  padding: 8px 14px;
+  border: 1px solid #c7d2fe;
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--primary);
+  background: #eef2ff;
+  cursor: default;
+  transition: background .15s;
+}
+
+.welcome-hint:hover {
+  background: #e0e7ff;
 }
 
 /* -- Input bar ------------------------------------------------------------ */
@@ -715,3 +744,274 @@ body {
 .log-INFO    { color: #89b4fa; }
 .log-WARNING { color: #f9e2af; }
 .log-ERROR   { color: #f38ba8; }
+
+/* -- BRD Workflow --------------------------------------------------------- */
+
+.brd-card {
+  border: 1px solid #c7d2fe;
+  background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+  border-radius: 10px;
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+.brd-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-bottom: 1px solid #c7d2fe;
+  background: rgba(99, 102, 241, .06);
+}
+
+.brd-card-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.brd-card-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.brd-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #312e81;
+}
+
+.brd-card-subtitle {
+  font-size: 12px;
+  color: #6366f1;
+  margin-top: 1px;
+}
+
+/* BRD workflow progress */
+.brd-progress {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid #e0e7ff;
+  background: rgba(255, 255, 255, .5);
+}
+
+.brd-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+.brd-step.done {
+  color: var(--green);
+}
+
+.brd-step.active {
+  color: var(--primary);
+}
+
+.brd-step-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--border);
+  color: var(--text-light);
+  flex-shrink: 0;
+}
+
+.brd-step.done .brd-step-num {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.brd-step.active .brd-step-num {
+  background: #eef2ff;
+  color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, .25);
+}
+
+.brd-step-connector {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.brd-step.done + .brd-step-connector {
+  background: var(--green);
+}
+
+/* Evidence summary body */
+.brd-evidence {
+  padding: 14px 18px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.brd-evidence-section {
+  margin-bottom: 10px;
+}
+
+.brd-evidence-section:last-child {
+  margin-bottom: 0;
+}
+
+.brd-evidence-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #6366f1;
+  margin-bottom: 3px;
+}
+
+.brd-evidence-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.brd-card-actions {
+  display: flex;
+  gap: 8px;
+  padding: 14px 18px;
+  border-top: 1px solid #e0e7ff;
+  background: rgba(255, 255, 255, .6);
+}
+
+.brd-btn-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--primary);
+  cursor: pointer;
+  transition: background .15s;
+}
+
+.brd-btn-confirm:hover {
+  background: var(--primary-hover);
+}
+
+.brd-btn-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--white);
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+
+.brd-btn-cancel:hover {
+  background: var(--bg);
+  border-color: var(--text-light);
+}
+
+/* BRD document output */
+.brd-document {
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  background: var(--white);
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.brd-document-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #eef2ff 0%, #f5f3ff 100%);
+  border-bottom: 1px solid #e0e7ff;
+}
+
+.brd-document-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  background: var(--primary);
+  color: #fff;
+}
+
+.brd-document-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.brd-document-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #312e81;
+}
+
+.brd-document-body {
+  padding: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.brd-document-body h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: #312e81;
+  margin: 18px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e0e7ff;
+}
+
+.brd-document-body h3:first-child {
+  margin-top: 0;
+}
+
+.brd-document-body p {
+  margin: 0 0 8px;
+}
+
+.brd-document-body ul,
+.brd-document-body ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.brd-document-body li {
+  margin-bottom: 3px;
+}

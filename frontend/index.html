@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>A2A Orchestrator</title>
+  <title>BRD Specialist</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -12,15 +12,15 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-title">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-          <h1>A2A Orchestrator</h1>
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <h1>BRD Specialist</h1>
         </div>
-        <button class="new-chat-btn" id="new-chat-btn">+ New Chat</button>
+        <button class="new-chat-btn" id="new-chat-btn">+ New BRD</button>
       </div>
       <div class="sidebar-content" id="conversation-list">
         <div class="empty-state">
-          <p class="empty-title">No conversations yet</p>
-          <p class="empty-sub">Start a new chat to begin</p>
+          <p class="empty-title">No documents yet</p>
+          <p class="empty-sub">Start a new BRD to begin</p>
         </div>
       </div>
     </aside>
@@ -34,9 +34,14 @@
       <div class="main-scroll" id="main-scroll">
         <div class="content-area" id="content-area">
           <div class="welcome">
-            <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
-            <h2>A2A Orchestrator</h2>
-            <p>Start a new chat or select a conversation from the sidebar</p>
+            <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <h2>BRD Specialist</h2>
+            <p>Describe your requirements and I'll generate a Business Requirements Document</p>
+            <div class="welcome-hints">
+              <span class="welcome-hint">Fetch records and draft a BRD</span>
+              <span class="welcome-hint">Analyse data and create requirements</span>
+              <span class="welcome-hint">Review evidence and generate docs</span>
+            </div>
           </div>
         </div>
       </div>
@@ -46,7 +51,7 @@
         <form id="message-form" class="input-form">
           <textarea
             id="message-input"
-            placeholder="Type a message..."
+            placeholder="Describe your BRD requirements..."
             maxlength="2000"
             rows="2"
           ></textarea>
@@ -60,7 +65,7 @@
       <!-- Log panel -->
       <div class="log-panel" id="log-panel">
         <div class="log-panel-header">
-          <span class="log-panel-title">Live Logs</span>
+          <span class="log-panel-title">Agent Activity</span>
           <button class="log-toggle" id="log-toggle" aria-label="Toggle logs">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="6 9 12 15 18 9"/></svg>
           </button>

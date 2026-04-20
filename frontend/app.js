@@ -1,8 +1,8 @@
 // frontend/app.js
 /**
- * A2A Orchestrator — Frontend Application
+ * BRD Specialist — Frontend Application
  *
- * Vanilla JS client for the conversation-based orchestrator API.
+ * Vanilla JS client for the BRD generation workflow.
  */
 
 "use strict";
@@ -92,8 +92,8 @@ function renderSidebar() {
   if (!conversations.length) {
     convList.innerHTML = `
       <div class="empty-state">
-        <p class="empty-title">No conversations yet</p>
-        <p class="empty-sub">Start a new chat to begin</p>
+        <p class="empty-title">No documents yet</p>
+        <p class="empty-sub">Start a new BRD to begin</p>
       </div>`;
     return;
   }
@@ -137,6 +137,70 @@ function renderSidebar() {
   });
 }
 
+/* -- BRD formatting helpers ------------------------------------------------ */
+
+const BRD_HEADINGS = [
+  "Problem Statement",
+  "Scope and Exclusions",
+  "Functional Requirements",
+  "Assumptions and Constraints",
+  "Risks and Open Questions",
+];
+
+function formatEvidenceSummary(text) {
+  const escaped = escapeHtml(text);
+  // Split on numbered headings like "1. Data Source" or "## Data Source"
+  const parts = escaped.split(/(?:^|\n)(?:\d+\.\s+|#{1,3}\s+)(.+?)(?:\n|$)/);
+  if (parts.length <= 1) {
+    return `<div class="brd-evidence-section"><div class="brd-evidence-text">${escaped}</div></div>`;
+  }
+
+  let html = "";
+  // First part before any heading
+  const preamble = parts[0].trim();
+  if (preamble) {
+    html += `<div class="brd-evidence-section"><div class="brd-evidence-text">${preamble}</div></div>`;
+  }
+  // Pairs of [heading, body]
+  for (let i = 1; i < parts.length; i += 2) {
+    const label = parts[i] || "";
+    const body = (parts[i + 1] || "").trim();
+    html += `<div class="brd-evidence-section">`;
+    html += `<div class="brd-evidence-label">${label}</div>`;
+    if (body) html += `<div class="brd-evidence-text">${body}</div>`;
+    html += `</div>`;
+  }
+  return html;
+}
+
+function isBrdDocument(text) {
+  const lower = text.toLowerCase();
+  let matches = 0;
+  for (const h of BRD_HEADINGS) {
+    if (lower.includes(h.toLowerCase())) matches++;
+  }
+  return matches >= 3;
+}
+
+function formatBrdDocument(text) {
+  let html = escapeHtml(text);
+  // Convert numbered headings or markdown headings to <h3>
+  html = html.replace(/(?:^|\n)(?:#{1,3}\s+)?(\d+\.\s+(?:Problem Statement|Scope and Exclusions|Functional Requirements|Assumptions and Constraints|Risks and Open Questions))/gi, "\n<h3>$1</h3>");
+  // Convert **bold** to <strong>
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Convert bullet lines to list items
+  html = html.replace(/(?:^|\n)[-*]\s+(.+)/g, "\n<li>$1</li>");
+  // Wrap consecutive <li> in <ul>
+  html = html.replace(/((?:<li>.+?<\/li>\n?)+)/g, "<ul>$1</ul>");
+  // Wrap remaining lines in <p> (skip tags and empty lines)
+  html = html.split("\n").map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("<")) return line;
+    return `<p>${trimmed}</p>`;
+  }).join("\n");
+  return html;
+}
+
 /* -- Render: main content area -------------------------------------------- */
 
 function renderContent() {
@@ -144,10 +208,15 @@ function renderContent() {
     contentArea.innerHTML = `
       <div class="welcome">
         <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
         </svg>
-        <h2>A2A Orchestrator</h2>
-        <p>Start a new chat or select a conversation from the sidebar</p>
+        <h2>BRD Specialist</h2>
+        <p>Describe your requirements and I'll generate a Business Requirements Document</p>
+        <div class="welcome-hints">
+          <span class="welcome-hint">Fetch records and draft a BRD</span>
+          <span class="welcome-hint">Analyse data and create requirements</span>
+          <span class="welcome-hint">Review evidence and generate docs</span>
+        </div>
       </div>`;
     return;
   }
@@ -160,11 +229,29 @@ function renderContent() {
     html += `<div class="chat-thread">`;
     for (const msg of c.messages) {
       const isUser = msg.role === "user";
-      html += `
-        <div class="chat-msg ${isUser ? "chat-msg-user" : "chat-msg-agent"}">
-          <div class="chat-msg-label">${isUser ? "You" : "Agent"} <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
-          <div class="chat-msg-content">${isUser ? escapeHtml(msg.content) : "<pre>" + escapeHtml(msg.content) + "</pre>"}</div>
-        </div>`;
+      const isBrd = !isUser && isBrdDocument(msg.content);
+      if (isBrd) {
+        html += `
+          <div class="chat-msg chat-msg-agent">
+            <div class="chat-msg-label">Agent <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
+            <div class="brd-document">
+              <div class="brd-document-header">
+                <span class="brd-document-badge">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  BRD
+                </span>
+                <span class="brd-document-label">Business Requirements Document</span>
+              </div>
+              <div class="brd-document-body">${formatBrdDocument(msg.content)}</div>
+            </div>
+          </div>`;
+      } else {
+        html += `
+          <div class="chat-msg ${isUser ? "chat-msg-user" : "chat-msg-agent"}">
+            <div class="chat-msg-label">${isUser ? "You" : "Agent"} <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
+            <div class="chat-msg-content">${isUser ? escapeHtml(msg.content) : "<pre>" + escapeHtml(msg.content) + "</pre>"}</div>
+          </div>`;
+      }
     }
     html += `</div>`;
   }
@@ -192,13 +279,30 @@ function renderContent() {
 
   if (c.status === "awaiting_brd_confirmation" && c.evidence_summary) {
     html += `
-      <div class="approval-box">
-        <h3>Evidence Summary Ready</h3>
-        <p>Review the fetched evidence summary above, then confirm to draft the BRD.</p>
-        <div class="approval-verdict">${escapeHtml(c.evidence_summary)}</div>
-        <div class="approval-actions">
-          <button class="btn-approve" data-action="confirm-evidence">&#10003; Confirm &amp; Draft BRD</button>
-          <button class="btn-reject" data-action="reject-evidence">&#10007; Cancel</button>
+      <div class="brd-card">
+        <div class="brd-card-header">
+          <div class="brd-card-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
+          <div>
+            <div class="brd-card-title">Evidence Summary Ready</div>
+            <div class="brd-card-subtitle">Review the findings below, then confirm to generate the BRD</div>
+          </div>
+        </div>
+        <div class="brd-progress">
+          <div class="brd-step done"><span class="brd-step-num">&#10003;</span> Fetch Data</div>
+          <span class="brd-step-connector"></span>
+          <div class="brd-step active"><span class="brd-step-num">2</span> Review Evidence</div>
+          <span class="brd-step-connector"></span>
+          <div class="brd-step"><span class="brd-step-num">3</span> Draft BRD</div>
+        </div>
+        <div class="brd-evidence">${formatEvidenceSummary(c.evidence_summary)}</div>
+        <div class="brd-card-actions">
+          <button class="brd-btn-confirm" data-action="confirm-evidence">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>
+            Confirm &amp; Draft BRD
+          </button>
+          <button class="brd-btn-cancel" data-action="reject-evidence">Cancel</button>
         </div>
       </div>`;
   }
@@ -280,12 +384,12 @@ function updateInput() {
   sendBtn.disabled = awaiting || !selectedId || !messageInput.value.trim();
   if (awaiting) {
     messageInput.placeholder = currentConv.status === "awaiting_brd_confirmation"
-      ? "Awaiting BRD confirmation..."
+      ? "Reviewing evidence — confirm or cancel above..."
       : "Awaiting approval...";
   } else if (!selectedId) {
-    messageInput.placeholder = "Start a new chat to begin...";
+    messageInput.placeholder = "Start a new BRD to begin...";
   } else {
-    messageInput.placeholder = "Type a message...";
+    messageInput.placeholder = "Describe your BRD requirements...";
   }
 }
 
