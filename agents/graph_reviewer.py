@@ -26,6 +26,8 @@ _SKILLS = [
         tags=["reasoning", "analysis", "implementation", "review"],
     ),
 ]
+
+
 def create_agent() -> Graph:
     """Build a graph-based agent with analyze -> implement -> review workflow."""
     model = create_toolless_model()

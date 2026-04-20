@@ -74,7 +74,7 @@ def create_agent() -> Swarm:
     swarm = Swarm(
         [researcher, writer, editor],
         entry_point=researcher,
-        max_handoffs=10,
+        max_handoffs=5,
         max_iterations=15,
         execution_timeout=300.0,
     )

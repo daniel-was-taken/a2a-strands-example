@@ -121,6 +121,8 @@ def _get_agent() -> Agent:
                 model=create_model(),
                 system_prompt=_build_system_prompt(agents_config),
                 tools=provider.tools,
+                callback_handler=None,
+                load_tools_from_directory=False,
             )
         else:
             from core.server import create_mcp_agent, load_agents_config
@@ -541,7 +543,8 @@ async def send_message(conversation_id: str, payload: MessageRequest) -> Convers
                 conversation_id,
                 Message(
                     role="agent",
-                    content="I couldn't fetch the evidence summary for the BRD workflow. Please try again.",
+                    content="I couldn't fetch the evidence summary for the BRD workflow. "
+                    "Please try again.",
                 ),
             )
             return conversation_store.get(conversation_id)  # type: ignore[return-value]

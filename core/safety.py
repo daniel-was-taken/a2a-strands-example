@@ -2,9 +2,9 @@
 
 import logging
 
-from strands import Agent, tool
+from strands import Agent
 
-from core.model import create_model
+from core.model import create_toolless_model
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +20,14 @@ Output exactly one of:
 """
 
 
-@tool
-def _dummy_tool() -> str:
-    """A placeholder tool to satisfy minimum tool requirements."""
-    return "ok"
-
-
 def create_safety_reviewer() -> Agent:
     """Create a safety reviewer agent."""
     return Agent(
-        model=create_model(),
+        model=create_toolless_model(),
         system_prompt=SAFETY_REVIEWER_SYSTEM_PROMPT,
-        tools=[_dummy_tool],
+        tools=[],
+        load_tools_from_directory=False,
+        callback_handler=None,
     )
 
 
