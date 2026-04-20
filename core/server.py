@@ -59,6 +59,7 @@ def create_mcp_agent(agent_config: dict) -> Agent:
         system_prompt=agent_config.get("system_prompt", "Use the available tools."),
         tools=[client],
         callback_handler=None,
+        load_tools_from_directory=False,
     )
 
 
@@ -75,42 +76,22 @@ def _build_skills(agent_config: dict) -> list[AgentSkill]:
     return [AgentSkill(**skill) for skill in agent_config.get("skills", [])]
 
 
-def serve_mcp_agent(agent_config: dict) -> None:
-    """Create and serve an MCP-backed agent as an A2A server."""
-    agent = create_mcp_agent(agent_config)
-    skills = _build_skills(agent_config)
-
-    serve_agent(
-        agent,
-        name=agent_config["name"],
-        port=agent_config["port"],
-        skills=skills,
-    )
-
-
-def serve_custom_agent(agent_config: dict) -> None:
-    """Create and serve a custom agent declared in agents.yaml."""
-    agent = create_custom_agent(agent_config)
-    skills = _build_skills(agent_config)
-
-    serve_agent(
-        agent,
-        name=agent_config["name"],
-        port=agent_config["port"],
-        skills=skills,
-    )
-
-
 def serve_configured_agent(agent_config: dict) -> None:
-    """Serve a configured agent regardless of whether it is MCP-backed or custom."""
+    """Create and serve a configured agent (MCP or custom) as an A2A server."""
     agent_type = agent_config["type"]
     if agent_type == "mcp":
-        serve_mcp_agent(agent_config)
-        return
-    if agent_type == "custom":
-        serve_custom_agent(agent_config)
-        return
-    raise ValueError(f"Unsupported agent type: {agent_type}")
+        agent = create_mcp_agent(agent_config)
+    elif agent_type == "custom":
+        agent = create_custom_agent(agent_config)
+    else:
+        raise ValueError(f"Unsupported agent type: {agent_type}")
+
+    serve_agent(
+        agent,
+        name=agent_config["name"],
+        port=agent_config["port"],
+        skills=_build_skills(agent_config),
+    )
 
 
 def serve_agent(

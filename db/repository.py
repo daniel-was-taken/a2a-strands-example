@@ -11,13 +11,13 @@ protocol as ``InMemoryConversationStore``, making it a drop-in replacement.
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from typing import Any
 
 import psycopg2
 import psycopg2.extras
 
+from core.config import settings
 from core.schemas import ActivityEvent, Conversation, ConversationStatus, Message
 
 _COLUMNS = (
@@ -51,12 +51,9 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 
 
 def _get_conn():
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        raise ValueError(
-            "DATABASE_URL environment variable is required for PostgresConversationStore"
-        )
-    return psycopg2.connect(url)
+    if not settings.database_url:
+        raise ValueError("DATABASE_URL is required for PostgresConversationStore")
+    return psycopg2.connect(settings.database_url)
 
 
 def _dict_cursor():
