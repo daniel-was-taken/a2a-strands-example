@@ -22,7 +22,7 @@ agents:
     skills:
       - id: database-ops
         name: Database Operations
-        description: "Schema inspection and SQL queries (SELECT, INSERT, DELETE)"
+        description: "Schema inspection and SQL queries (SELECT)"
         tags: [database, sql]
 
   # ── Graph agent (multi-step workflow) ─────────────────────────────────────
