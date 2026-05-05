@@ -20,6 +20,9 @@ class ActivityEvent(BaseModel):
     agent: str
     action: str
     detail: str = ""
+    duration_ms: float | None = None
+    status: str | None = None
+    trace_url: str | None = None
 
 
 class Message(BaseModel):

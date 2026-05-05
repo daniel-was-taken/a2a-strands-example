@@ -1,14 +1,19 @@
-"""In-memory conversation store.
+"""Conversation store — async protocol + in-memory implementation.
 
-Provides a thread-safe store for conversation records. Implements the
-``ConversationStore`` protocol so it can be swapped for a persistent backend
-(Redis, PostgreSQL, etc.) without changing calling code.
+The orchestrator talks to one of two backends:
+
+- ``InMemoryConversationStore`` (default)
+- ``PostgresConversationStore`` (see ``db/repository.py``) when
+  ``STORE_BACKEND=postgres`` and ``DATABASE_URL`` is configured.
+
+Both implement the async :class:`ConversationStore` protocol so FastAPI
+handlers can ``await`` store calls without blocking the event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import threading
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -19,55 +24,55 @@ logger = logging.getLogger(__name__)
 
 
 class ConversationStore(Protocol):
-    """Abstract interface for conversation persistence."""
+    """Abstract async interface for conversation persistence."""
 
-    def create(self, conversation: Conversation) -> None: ...
-    def get(self, conversation_id: str) -> Conversation | None: ...
-    def list_all(self) -> list[Conversation]: ...
-    def add_message(self, conversation_id: str, message: Message) -> None: ...
-    def add_event(self, conversation_id: str, event: ActivityEvent) -> None: ...
-    def update(self, conversation_id: str, **fields: Any) -> Conversation | None: ...
-    def delete(self, conversation_id: str) -> None: ...
+    async def create(self, conversation: Conversation) -> None: ...
+    async def get(self, conversation_id: str) -> Conversation | None: ...
+    async def list_all(self) -> list[Conversation]: ...
+    async def add_message(self, conversation_id: str, message: Message) -> None: ...
+    async def add_event(self, conversation_id: str, event: ActivityEvent) -> None: ...
+    async def update(self, conversation_id: str, **fields: Any) -> Conversation | None: ...
+    async def delete(self, conversation_id: str) -> None: ...
 
 
 class InMemoryConversationStore:
-    """Thread-safe dict-backed implementation of :class:`ConversationStore`."""
+    """Async-safe dict-backed implementation of :class:`ConversationStore`."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = asyncio.Lock()
         self._conversations: dict[str, Conversation] = {}
 
-    def create(self, conversation: Conversation) -> None:
-        with self._lock:
+    async def create(self, conversation: Conversation) -> None:
+        async with self._lock:
             self._conversations[conversation.id] = conversation
 
-    def get(self, conversation_id: str) -> Conversation | None:
-        with self._lock:
+    async def get(self, conversation_id: str) -> Conversation | None:
+        async with self._lock:
             return self._conversations.get(conversation_id)
 
-    def list_all(self) -> list[Conversation]:
-        with self._lock:
+    async def list_all(self) -> list[Conversation]:
+        async with self._lock:
             return sorted(
                 self._conversations.values(),
                 key=lambda c: c.updated_at,
                 reverse=True,
             )
 
-    def add_message(self, conversation_id: str, message: Message) -> None:
-        with self._lock:
+    async def add_message(self, conversation_id: str, message: Message) -> None:
+        async with self._lock:
             conv = self._conversations.get(conversation_id)
             if conv:
                 conv.messages.append(message)
                 conv.updated_at = datetime.now(UTC).isoformat()
 
-    def add_event(self, conversation_id: str, event: ActivityEvent) -> None:
-        with self._lock:
+    async def add_event(self, conversation_id: str, event: ActivityEvent) -> None:
+        async with self._lock:
             conv = self._conversations.get(conversation_id)
             if conv:
                 conv.events.append(event)
 
-    def update(self, conversation_id: str, **fields: Any) -> Conversation | None:
-        with self._lock:
+    async def update(self, conversation_id: str, **fields: Any) -> Conversation | None:
+        async with self._lock:
             conv = self._conversations.get(conversation_id)
             if conv:
                 for key, value in fields.items():
@@ -76,8 +81,8 @@ class InMemoryConversationStore:
                 return conv
             return None
 
-    def delete(self, conversation_id: str) -> None:
-        with self._lock:
+    async def delete(self, conversation_id: str) -> None:
+        async with self._lock:
             self._conversations.pop(conversation_id, None)
 
 
@@ -85,6 +90,10 @@ def _create_store() -> ConversationStore:
     if settings.store_backend == "postgres":
         from db.repository import PostgresConversationStore
 
+        if not settings.database_url:
+            raise ValueError(
+                "STORE_BACKEND=postgres requires DATABASE_URL to be configured"
+            )
         logger.info("Using PostgresConversationStore (DATABASE_URL)")
         return PostgresConversationStore()
     logger.info("Using InMemoryConversationStore")

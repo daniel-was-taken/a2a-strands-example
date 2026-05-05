@@ -21,7 +21,6 @@ class Settings(BaseSettings):
 
     # ── Orchestrator ──────────────────────────────────────────────────────────
     orchestrator_port: int = 8000
-    database_mode: str = "a2a"
     #: Comma-separated list of allowed CORS origins.
     allowed_origins: str = "*"
     #: When non-empty, the orchestrator validates this key on every request.
@@ -40,11 +39,26 @@ class Settings(BaseSettings):
     store_backend: str = "memory"
     database_url: str | None = None
 
+    # ── Neon Data API ─────────────────────────────────────────────────────────
+    #: Neon SQL-over-HTTP endpoint (e.g. https://<project>.neon.tech/sql).
+    neon_database_url: str | None = None
+    #: Full Postgres connection string sent in the ``Neon-Connection-String``
+    #: header (e.g. ``postgresql://user:pass@<host>/<db>?sslmode=require``).
+    neon_connection_string: str | None = None
+
     # ── Agent-to-Agent Auth ───────────────────────────────────────────────────
     #: Shared secret for inter-agent calls (X-Agent-API-Key header).
     #: When set, every A2AServer validates this header.
     #: Leave empty to disable auth (local dev only).
     agent_api_key: str = ""
+
+    # ── Langfuse Observability ─────────────────────────────────────────────────
+    #: Langfuse Cloud public key (pk-lf-...).
+    langfuse_public_key: str | None = None
+    #: Langfuse Cloud secret key (sk-lf-...).
+    langfuse_secret_key: str | None = None
+    #: Langfuse host URL. Defaults to Langfuse Cloud.
+    langfuse_host: str = "https://cloud.langfuse.com"
 
 
 settings = Settings()

@@ -76,6 +76,18 @@ def _build_skills(agent_config: dict) -> list[AgentSkill]:
     return [AgentSkill(**skill) for skill in agent_config.get("skills", [])]
 
 
+def _attach_langfuse_hook(agent: Any, agent_name: str) -> None:
+    """Register the Langfuse tracing hook on an agent if it has a hook registry."""
+    if not hasattr(agent, "hooks"):
+        return
+    try:
+        from core.telemetry import LangfuseTracingHook
+
+        agent.hooks.add_hook(LangfuseTracingHook(agent_name=agent_name))
+    except Exception:
+        logger.debug("Langfuse hook not attached to %s", agent_name, exc_info=True)
+
+
 def serve_configured_agent(agent_config: dict) -> None:
     """Create and serve a configured agent (MCP or custom) as an A2A server."""
     agent_type = agent_config["type"]
@@ -85,6 +97,8 @@ def serve_configured_agent(agent_config: dict) -> None:
         agent = create_custom_agent(agent_config)
     else:
         raise ValueError(f"Unsupported agent type: {agent_type}")
+
+    _attach_langfuse_hook(agent, agent_config["name"])
 
     serve_agent(
         agent,
