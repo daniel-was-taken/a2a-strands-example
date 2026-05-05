@@ -268,15 +268,19 @@ body {
   padding: 8px 14px;
   border: 1px solid #c7d2fe;
   border-radius: 20px;
+  font: inherit;
   font-size: 12px;
   color: var(--primary);
   background: #eef2ff;
-  cursor: default;
-  transition: background .15s;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
 }
 
-.welcome-hint:hover {
+.welcome-hint:hover,
+.welcome-hint:focus-visible {
   background: #e0e7ff;
+  border-color: var(--primary);
+  outline: none;
 }
 
 /* -- Input bar ------------------------------------------------------------ */
@@ -438,6 +442,7 @@ body {
 
 .approval-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -507,6 +512,7 @@ body {
 
 .activity-body {
   overflow: hidden;
+  max-height: 500px;
   transition: max-height .2s ease;
 }
 
@@ -892,6 +898,7 @@ body {
 
 .brd-card-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 14px 18px;
   border-top: 1px solid #e0e7ff;
@@ -1014,4 +1021,188 @@ body {
 
 .brd-document-body li {
   margin-bottom: 3px;
+}
+
+/* -- Typing indicator ---------------------------------------------------- */
+
+.chat-msg-typing .typing-dots {
+  display: inline-flex;
+  gap: 4px;
+  padding: 6px 2px;
+}
+
+.chat-msg-typing .typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-light);
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+
+.chat-msg-typing .typing-dots span:nth-child(2) { animation-delay: .2s; }
+.chat-msg-typing .typing-dots span:nth-child(3) { animation-delay: .4s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+
+/* -- Response time display ----------------------------------------------- */
+
+.input-meta {
+  max-width: 720px;
+  margin: 0 auto 6px;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 14px;
+}
+
+.response-time {
+  font-size: 11px;
+  color: var(--text-light);
+  font-variant-numeric: tabular-nums;
+}
+
+/* -- Sidebar loading skeleton -------------------------------------------- */
+
+.sidebar-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.sidebar-skeleton {
+  height: 40px;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--bg) 0%, #eef2ff 50%, var(--bg) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* -- Markdown body (agent messages + BRD docs) ---------------------------- */
+
+.md-body {
+  font-size: 14px;
+  color: var(--text);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.md-body > * + * { margin-top: 8px; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+}
+.md-body h1 { font-size: 18px; margin-top: 12px; }
+.md-body h2 { font-size: 16px; margin-top: 12px; }
+.md-body h3 { font-size: 15px; margin-top: 10px; }
+.md-body h4 { font-size: 14px; margin-top: 8px; }
+.md-body p  { line-height: 1.55; }
+.md-body ul, .md-body ol { padding-left: 20px; }
+.md-body li { margin-top: 2px; }
+.md-body li > p { display: inline; }
+.md-body code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.md-body pre {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: #f3f4f6;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  white-space: pre;
+}
+.md-body pre code { background: transparent; padding: 0; border-radius: 0; }
+.md-body blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+  color: var(--text-muted);
+}
+.md-body a { color: var(--primary); text-decoration: underline; }
+.md-body table { border-collapse: collapse; width: 100%; }
+.md-body th, .md-body td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+.md-body th { background: var(--bg); font-weight: 600; }
+.md-fallback {
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* -- Live streaming bubble ------------------------------------------------ */
+
+.chat-msg-agent .live-stream {
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+/* Blinking caret at the tail of the streaming text. */
+.chat-msg-agent .live-stream::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--primary);
+  animation: live-caret 1s steps(2, start) infinite;
+  font-weight: 400;
+}
+@keyframes live-caret {
+  to { visibility: hidden; }
+}
+
+/* -- Copy button ---------------------------------------------------------- */
+
+.chat-msg { position: relative; }
+.copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--white);
+  color: var(--text-muted);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease, color .15s ease, border-color .15s ease;
+}
+.chat-msg:hover .copy-btn,
+.chat-msg:focus-within .copy-btn,
+.copy-btn:focus-visible {
+  opacity: 1;
+}
+.copy-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.copy-btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+/* Inline variant: sits in the BRD document header, not absolutely positioned. */
+.copy-btn-inline {
+  position: static;
+  opacity: 1;
+  margin-left: auto;
 }

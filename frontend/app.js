@@ -9,22 +9,63 @@
 
 /* -- API Client ----------------------------------------------------------- */
 
+const MAX_TIMINGS = 20;
+
 class ApiClient {
   constructor(baseUrl = "") {
     this.baseUrl = baseUrl;
+    this._timings = [];
+    this._serverTimings = [];
   }
 
   async _request(path, options = {}) {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      headers: { "Content-Type": "application/json" },
-      ...options,
-    });
+    const start = performance.now();
+    let res;
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        headers: { "Content-Type": "application/json" },
+        ...options,
+      });
+    } catch (err) {
+      // Network errors (offline, DNS failure, etc.) throw TypeError.
+      if (err instanceof TypeError) {
+        throw new Error("Network error — check your connection");
+      }
+      throw err;
+    }
+
+    const durationMs = performance.now() - start;
+    this._recordTiming(path, durationMs);
+    const serverMs = parseFloat(res.headers.get("X-Response-Time-Ms") || "");
+    if (!Number.isNaN(serverMs)) this._recordServerTiming(serverMs);
+
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.detail || `Request failed: ${res.status}`);
     }
     if (res.status === 204) return null;
     return res.json();
+  }
+
+  _recordTiming(path, ms) {
+    this._timings.push({ path, ms, at: Date.now() });
+    if (this._timings.length > MAX_TIMINGS) this._timings.shift();
+    updateResponseTimeUI();
+  }
+
+  _recordServerTiming(ms) {
+    this._serverTimings.push(ms);
+    if (this._serverTimings.length > MAX_TIMINGS) this._serverTimings.shift();
+  }
+
+  getAverageMs() {
+    if (!this._timings.length) return 0;
+    return this._timings.reduce((sum, t) => sum + t.ms, 0) / this._timings.length;
+  }
+
+  getAverageServerMs() {
+    if (!this._serverTimings.length) return 0;
+    return this._serverTimings.reduce((a, b) => a + b, 0) / this._serverTimings.length;
   }
 
   createConversation()      { return this._request("/conversations", { method: "POST" }); }
@@ -36,16 +77,102 @@ class ApiClient {
   reject(id)                { return this._request(`/conversations/${encodeURIComponent(id)}/reject`, { method: "POST" }); }
   confirmEvidence(id)       { return this._request(`/conversations/${encodeURIComponent(id)}/confirm-evidence`, { method: "POST" }); }
   rejectEvidence(id)        { return this._request(`/conversations/${encodeURIComponent(id)}/reject-evidence`, { method: "POST" }); }
+
+  /**
+   * Streaming variant of sendMessage that consumes SSE frames from the orchestrator.
+   * Calls onToken(text) for each "token" event, onDone(conversation) when complete,
+   * and onError(message) if the stream fails. Returns a promise that resolves when
+   * the stream ends (either via "done" or "error").
+   */
+  async sendMessageStream(id, content, { onToken, onDone, onError } = {}) {
+    const start = performance.now();
+    let firstTokenAt = null;
+    let res;
+    try {
+      res = await fetch(
+        `${this.baseUrl}/conversations/${encodeURIComponent(id)}/messages/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        },
+      );
+    } catch (err) {
+      const msg = err instanceof TypeError ? "Network error — check your connection" : err.message;
+      if (onError) onError(msg);
+      return;
+    }
+
+    if (!res.ok || !res.body) {
+      const body = await res.json().catch(() => ({}));
+      if (onError) onError(body.detail || `Request failed: ${res.status}`);
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    // Parse SSE frames: each frame is "event: X\ndata: {...}\n\n".
+    const consumeFrames = () => {
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        let event = "message";
+        const dataLines = [];
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        let payload = null;
+        if (dataLines.length) {
+          try { payload = JSON.parse(dataLines.join("\n")); }
+          catch { payload = { raw: dataLines.join("\n") }; }
+        }
+        if (event === "token" && payload && typeof payload.text === "string") {
+          if (firstTokenAt === null) firstTokenAt = performance.now() - start;
+          if (onToken) onToken(payload.text);
+        } else if (event === "done") {
+          const total = performance.now() - start;
+          this._recordTiming("/conversations/:id/messages/stream", total);
+          if (onDone) onDone(payload ? payload.conversation : null, { firstTokenMs: firstTokenAt, totalMs: total });
+        } else if (event === "error") {
+          if (onError) onError(payload && payload.message ? payload.message : "Stream failed");
+        }
+      }
+    };
+
+    while (true) {
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        if (onError) onError(err.message || "Stream read failed");
+        return;
+      }
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      consumeFrames();
+    }
+    // Flush any remaining complete frame without trailing \n\n.
+    if (buffer.trim()) {
+      buffer += "\n\n";
+      consumeFrames();
+    }
+  }
 }
 
 const api = new ApiClient();
+const supportsStreaming = typeof ReadableStream !== "undefined" && typeof TextDecoder !== "undefined";
 
 /* -- State ---------------------------------------------------------------- */
 
 let conversations = [];
 let selectedId = null;
 let currentConv = null;
-let pollTimer = null;
+let sidebarPollTimer = null;
+let sidebarLoading = true;
 
 /* -- DOM refs ------------------------------------------------------------- */
 
@@ -63,6 +190,10 @@ const logPanel      = $("#log-panel");
 const logToggle     = $("#log-toggle");
 const logBody       = $("#log-body");
 const newChatBtn    = $("#new-chat-btn");
+const responseTimeEl = $("#response-time");
+
+const SEND_BTN_HTML = sendBtn.innerHTML;
+const TEXTAREA_MAX_ROWS = 6;
 
 /* -- Helpers -------------------------------------------------------------- */
 
@@ -71,24 +202,48 @@ function fmtTime(iso) {
   catch { return iso; }
 }
 
+const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function escapeHtml(str) {
-  const d = document.createElement("div");
-  d.textContent = str;
-  return d.innerHTML;
+  return String(str).replace(/[&<>"']/g, (m) => HTML_ESCAPE[m]);
 }
 
 function showToast(msg) {
   const el = document.createElement("div");
   el.className = "toast";
   el.innerHTML = `<span>${escapeHtml(msg)}</span><button aria-label="Close">&times;</button>`;
-  el.querySelector("button").onclick = () => el.remove();
+  let timeoutId = null;
+  const remove = () => {
+    if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+    if (el.isConnected) el.remove();
+  };
+  el.querySelector("button").onclick = remove;
   toastBox.appendChild(el);
-  setTimeout(() => el.remove(), 6000);
+  timeoutId = setTimeout(remove, 6000);
+}
+
+function updateResponseTimeUI() {
+  if (!responseTimeEl) return;
+  const avg = api.getAverageMs();
+  if (!avg) { responseTimeEl.textContent = ""; return; }
+  const secs = avg / 1000;
+  responseTimeEl.textContent = secs >= 1
+    ? `Avg response: ${secs.toFixed(1)}s`
+    : `Avg response: ${Math.round(avg)}ms`;
 }
 
 /* -- Render: sidebar conversation list ------------------------------------ */
 
 function renderSidebar() {
+  if (sidebarLoading) {
+    convList.innerHTML = `
+      <div class="sidebar-loading">
+        <div class="sidebar-skeleton"></div>
+        <div class="sidebar-skeleton"></div>
+        <div class="sidebar-skeleton"></div>
+      </div>`;
+    return;
+  }
+
   if (!conversations.length) {
     convList.innerHTML = `
       <div class="empty-state">
@@ -99,21 +254,30 @@ function renderSidebar() {
   }
 
   convList.innerHTML = conversations.map((c) => `
-    <div class="conv-item ${c.id === selectedId ? "active" : ""}" data-id="${escapeHtml(c.id)}">
+    <div class="conv-item ${c.id === selectedId ? "active" : ""}" data-id="${escapeHtml(c.id)}" role="button" tabindex="0">
       <div class="conv-item-body">
         <div class="conv-item-title">${escapeHtml(c.title)}</div>
         <div class="conv-item-time">${fmtTime(c.updated_at)}</div>
       </div>
       ${c.status !== "active" ? `<span class="conv-item-warning" title="${escapeHtml(c.status)}">&#9888;</span>` : ""}
-      <button class="delete-btn" data-delete="${escapeHtml(c.id)}" title="Delete conversation">&times;</button>
+      <button class="delete-btn" data-delete="${escapeHtml(c.id)}" title="Delete conversation" aria-label="Delete conversation">&times;</button>
     </div>
   `).join("");
 
   convList.querySelectorAll(".conv-item").forEach((el) => {
-    el.addEventListener("click", (e) => {
-      if (e.target.closest(".delete-btn")) return;
+    const activate = () => {
       selectConversation(el.dataset.id);
       closeSidebar();
+    };
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".delete-btn")) return;
+      activate();
+    });
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        activate();
+      }
     });
   });
 
@@ -137,7 +301,7 @@ function renderSidebar() {
   });
 }
 
-/* -- BRD formatting helpers ------------------------------------------------ */
+/* -- Markdown + BRD formatting -------------------------------------------- */
 
 const BRD_HEADINGS = [
   "Problem Statement",
@@ -147,34 +311,29 @@ const BRD_HEADINGS = [
   "Risks and Open Questions",
 ];
 
-function formatEvidenceSummary(text) {
-  const escaped = escapeHtml(text);
-  // Split on numbered headings like "1. Data Source" or "## Data Source"
-  const parts = escaped.split(/(?:^|\n)(?:\d+\.\s+|#{1,3}\s+)(.+?)(?:\n|$)/);
-  if (parts.length <= 1) {
-    return `<div class="brd-evidence-section"><div class="brd-evidence-text">${escaped}</div></div>`;
-  }
+// Configure marked once. GFM + breaks gives us tables, fenced code, and
+// newline-as-<br> which matches how the LLM tends to format output.
+if (window.marked && typeof window.marked.setOptions === "function") {
+  window.marked.setOptions({ gfm: true, breaks: true, mangle: false, headerIds: false });
+}
 
-  let html = "";
-  // First part before any heading
-  const preamble = parts[0].trim();
-  if (preamble) {
-    html += `<div class="brd-evidence-section"><div class="brd-evidence-text">${preamble}</div></div>`;
+function renderMarkdown(text) {
+  const parser = window.marked;
+  const sanitizer = window.DOMPurify;
+  // Fallback: if either library failed to load, escape and preserve newlines.
+  if (!parser || !sanitizer) {
+    return `<pre class="md-fallback">${escapeHtml(text)}</pre>`;
   }
-  // Pairs of [heading, body]
-  for (let i = 1; i < parts.length; i += 2) {
-    const label = parts[i] || "";
-    const body = (parts[i + 1] || "").trim();
-    html += `<div class="brd-evidence-section">`;
-    html += `<div class="brd-evidence-label">${label}</div>`;
-    if (body) html += `<div class="brd-evidence-text">${body}</div>`;
-    html += `</div>`;
-  }
-  return html;
+  const raw = parser.parse(String(text || ""));
+  return sanitizer.sanitize(raw, { USE_PROFILES: { html: true } });
+}
+
+function formatEvidenceSummary(text) {
+  return renderMarkdown(text);
 }
 
 function isBrdDocument(text) {
-  const lower = text.toLowerCase();
+  const lower = String(text || "").toLowerCase();
   let matches = 0;
   for (const h of BRD_HEADINGS) {
     if (lower.includes(h.toLowerCase())) matches++;
@@ -183,22 +342,7 @@ function isBrdDocument(text) {
 }
 
 function formatBrdDocument(text) {
-  let html = escapeHtml(text);
-  // Convert numbered headings or markdown headings to <h3>
-  html = html.replace(/(?:^|\n)(?:#{1,3}\s+)?(\d+\.\s+(?:Problem Statement|Scope and Exclusions|Functional Requirements|Assumptions and Constraints|Risks and Open Questions))/gi, "\n<h3>$1</h3>");
-  // Convert **bold** to <strong>
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  // Convert bullet lines to list items
-  html = html.replace(/(?:^|\n)[-*]\s+(.+)/g, "\n<li>$1</li>");
-  // Wrap consecutive <li> in <ul>
-  html = html.replace(/((?:<li>.+?<\/li>\n?)+)/g, "<ul>$1</ul>");
-  // Wrap remaining lines in <p> (skip tags and empty lines)
-  html = html.split("\n").map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("<")) return line;
-    return `<p>${trimmed}</p>`;
-  }).join("\n");
-  return html;
+  return renderMarkdown(text);
 }
 
 /* -- Render: main content area -------------------------------------------- */
@@ -213,18 +357,20 @@ function renderContent() {
         <h2>BRD Specialist</h2>
         <p>Describe your requirements and I'll generate a Business Requirements Document</p>
         <div class="welcome-hints">
-          <span class="welcome-hint">Fetch records and draft a BRD</span>
-          <span class="welcome-hint">Analyse data and create requirements</span>
-          <span class="welcome-hint">Review evidence and generate docs</span>
+          <button type="button" class="welcome-hint" data-hint="Fetch records and draft a BRD">Fetch records and draft a BRD</button>
+          <button type="button" class="welcome-hint" data-hint="Analyse data and create requirements">Analyse data and create requirements</button>
+          <button type="button" class="welcome-hint" data-hint="Review evidence and generate docs">Review evidence and generate docs</button>
         </div>
       </div>`;
+    contentArea.querySelectorAll(".welcome-hint").forEach((btn) => {
+      btn.addEventListener("click", () => useWelcomeHint(btn.dataset.hint));
+    });
     return;
   }
 
   const c = currentConv;
   let html = "";
 
-  // Messages
   if (c.messages && c.messages.length) {
     html += `<div class="chat-thread">`;
     for (const msg of c.messages) {
@@ -232,7 +378,7 @@ function renderContent() {
       const isBrd = !isUser && isBrdDocument(msg.content);
       if (isBrd) {
         html += `
-          <div class="chat-msg chat-msg-agent">
+          <div class="chat-msg chat-msg-agent" data-msg-index="${c.messages.indexOf(msg)}">
             <div class="chat-msg-label">Agent <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
             <div class="brd-document">
               <div class="brd-document-header">
@@ -241,22 +387,32 @@ function renderContent() {
                   BRD
                 </span>
                 <span class="brd-document-label">Business Requirements Document</span>
+                <button class="copy-btn copy-btn-inline" data-copy-msg="${c.messages.indexOf(msg)}" title="Copy BRD" aria-label="Copy BRD">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <span>Copy</span>
+                </button>
               </div>
-              <div class="brd-document-body">${formatBrdDocument(msg.content)}</div>
+              <div class="brd-document-body md-body">${formatBrdDocument(msg.content)}</div>
             </div>
           </div>`;
       } else {
+        const body = isUser
+          ? escapeHtml(msg.content)
+          : `<div class="md-body">${renderMarkdown(msg.content)}</div>`;
         html += `
-          <div class="chat-msg ${isUser ? "chat-msg-user" : "chat-msg-agent"}">
+          <div class="chat-msg ${isUser ? "chat-msg-user" : "chat-msg-agent"}" data-msg-index="${c.messages.indexOf(msg)}">
             <div class="chat-msg-label">${isUser ? "You" : "Agent"} <span class="chat-msg-time">${fmtTime(msg.timestamp)}</span></div>
-            <div class="chat-msg-content">${isUser ? escapeHtml(msg.content) : "<pre>" + escapeHtml(msg.content) + "</pre>"}</div>
+            <div class="chat-msg-content">${body}</div>
+            ${isUser ? "" : `<button class="copy-btn" data-copy-msg="${c.messages.indexOf(msg)}" title="Copy message" aria-label="Copy message">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span>Copy</span>
+            </button>`}
           </div>`;
       }
     }
     html += `</div>`;
   }
 
-  // Approval dialog
   if (c.status === "awaiting_approval" && c.review_verdict) {
     const isReject = c.review_recommended_reject;
     const heading = isReject
@@ -307,7 +463,6 @@ function renderContent() {
       </div>`;
   }
 
-  // Activity log
   if (c.events && c.events.length) {
     html += `
       <div class="activity-log">
@@ -334,7 +489,6 @@ function renderContent() {
 
   contentArea.innerHTML = html;
 
-  // Wire approval buttons
   contentArea.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const action = btn.dataset.action;
@@ -357,7 +511,6 @@ function renderContent() {
     });
   });
 
-  // Wire activity toggle
   const actToggle = $("#activity-toggle");
   if (actToggle) {
     actToggle.addEventListener("click", () => {
@@ -368,9 +521,176 @@ function renderContent() {
     });
   }
 
-  // Auto-scroll to bottom
-  const mainScroll = $("#main-scroll");
-  mainScroll.scrollTop = mainScroll.scrollHeight;
+  contentArea.querySelectorAll("[data-copy-msg]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const idx = Number(btn.dataset.copyMsg);
+      const msg = c.messages?.[idx];
+      if (!msg) return;
+      try {
+        await copyToClipboard(msg.content);
+        showToast("Copied to clipboard");
+      } catch {
+        showToast("Copy failed");
+      }
+    });
+  });
+
+  maybeScrollToBottom();
+}
+
+async function copyToClipboard(text) {
+  // Prefer the async Clipboard API. Fall back to a hidden textarea for
+  // older browsers / insecure contexts (file://, http without TLS).
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "absolute";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand("copy");
+  } finally {
+    ta.remove();
+  }
+}
+
+/* -- Typing / streaming bubble ------------------------------------------- */
+
+// Scroll anchoring: only auto-scroll while the user is reading the tail. If
+// they scroll up to read an earlier part of the conversation, we leave them
+// alone until they scroll back near the bottom.
+const SCROLL_STICK_PX = 80;
+let _userNearBottom = true;
+
+function isNearBottom() {
+  const main = $("#main-scroll");
+  if (!main) return true;
+  return (main.scrollHeight - main.scrollTop - main.clientHeight) < SCROLL_STICK_PX;
+}
+
+function maybeScrollToBottom() {
+  if (!_userNearBottom) return;
+  scrollMainToBottom();
+}
+
+function scrollMainToBottom() {
+  const main = $("#main-scroll");
+  if (main) main.scrollTop = main.scrollHeight;
+  _userNearBottom = true;
+}
+
+function initScrollTracking() {
+  const main = $("#main-scroll");
+  if (!main) return;
+  main.addEventListener("scroll", () => {
+    _userNearBottom = isNearBottom();
+  }, { passive: true });
+}
+
+function ensureChatThread() {
+  let thread = contentArea.querySelector(".chat-thread");
+  if (!thread) {
+    thread = document.createElement("div");
+    thread.className = "chat-thread";
+    contentArea.appendChild(thread);
+  }
+  return thread;
+}
+
+function appendUserBubble(text) {
+  const thread = ensureChatThread();
+  const el = document.createElement("div");
+  el.className = "chat-msg chat-msg-user";
+  el.innerHTML = `
+    <div class="chat-msg-label">You <span class="chat-msg-time">${fmtTime(new Date().toISOString())}</span></div>
+    <div class="chat-msg-content">${escapeHtml(text)}</div>`;
+  thread.appendChild(el);
+  // The user just submitted — always stick to the bottom regardless of
+  // their previous scroll position.
+  scrollMainToBottom();
+}
+
+function showTypingIndicator() {
+  const thread = ensureChatThread();
+  const el = document.createElement("div");
+  el.className = "chat-msg chat-msg-agent chat-msg-typing";
+  el.id = "typing-indicator";
+  el.innerHTML = `
+    <div class="chat-msg-label">Agent</div>
+    <div class="typing-dots" aria-label="Agent is thinking"><span></span><span></span><span></span></div>`;
+  thread.appendChild(el);
+  contentArea.setAttribute("aria-busy", "true");
+  maybeScrollToBottom();
+  return el;
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById("typing-indicator");
+  if (el) el.remove();
+  contentArea.setAttribute("aria-busy", "false");
+}
+
+// ---- Live streaming bubble: rAF-batched token appends ----
+let _liveBuffer = "";
+let _liveRafScheduled = false;
+
+function ensureLiveAgentBubble() {
+  let el = document.getElementById("live-agent-bubble");
+  if (el) return el;
+
+  // Prefer to morph the typing indicator in place. This avoids a DOM-level
+  // remove/insert flicker when the first token arrives.
+  const typing = document.getElementById("typing-indicator");
+  if (typing) {
+    typing.id = "live-agent-bubble";
+    typing.classList.remove("chat-msg-typing");
+    typing.innerHTML = `
+      <div class="chat-msg-label">Agent <span class="chat-msg-time">${fmtTime(new Date().toISOString())}</span></div>
+      <div class="chat-msg-content"><pre class="live-stream"></pre></div>`;
+    return typing;
+  }
+
+  const thread = ensureChatThread();
+  el = document.createElement("div");
+  el.className = "chat-msg chat-msg-agent";
+  el.id = "live-agent-bubble";
+  el.innerHTML = `
+    <div class="chat-msg-label">Agent <span class="chat-msg-time">${fmtTime(new Date().toISOString())}</span></div>
+    <div class="chat-msg-content"><pre class="live-stream"></pre></div>`;
+  thread.appendChild(el);
+  maybeScrollToBottom();
+  return el;
+}
+
+function _flushLiveBuffer() {
+  _liveRafScheduled = false;
+  if (!_liveBuffer) return;
+  const el = ensureLiveAgentBubble();
+  const pre = el.querySelector("pre");
+  pre.textContent += _liveBuffer;
+  _liveBuffer = "";
+  maybeScrollToBottom();
+}
+
+function appendLiveToken(token) {
+  _liveBuffer += token;
+  if (!_liveRafScheduled) {
+    _liveRafScheduled = true;
+    requestAnimationFrame(_flushLiveBuffer);
+  }
+}
+
+function removeLiveAgentBubble() {
+  _liveBuffer = "";
+  _liveRafScheduled = false;
+  const el = document.getElementById("live-agent-bubble");
+  if (el) el.remove();
 }
 
 /* -- Input state ---------------------------------------------------------- */
@@ -393,13 +713,25 @@ function updateInput() {
   }
 }
 
+function autoResizeTextarea() {
+  messageInput.style.height = "auto";
+  const lineHeight = parseFloat(getComputedStyle(messageInput).lineHeight) || 20;
+  const maxHeight = lineHeight * TEXTAREA_MAX_ROWS + 20; // padding buffer
+  const next = Math.min(messageInput.scrollHeight, maxHeight);
+  messageInput.style.height = `${next}px`;
+  messageInput.style.overflowY = messageInput.scrollHeight > maxHeight ? "auto" : "hidden";
+}
+
 /* -- Data fetching -------------------------------------------------------- */
 
 async function fetchConversations() {
   try {
     conversations = await api.getConversations();
+    sidebarLoading = false;
     renderSidebar();
   } catch (err) {
+    sidebarLoading = false;
+    renderSidebar();
     console.error("Failed to fetch conversations:", err);
   }
 }
@@ -418,17 +750,17 @@ async function selectConversation(id) {
   selectedId = id;
   renderSidebar();
   await fetchConversation(id);
+  startSidebarPoll();
 }
 
-function startPoll() {
-  stopPoll();
-  pollTimer = setInterval(async () => {
-    if (selectedId) await fetchConversation(selectedId);
-  }, 3000);
+function startSidebarPoll() {
+  stopSidebarPoll();
+  // Light-weight refresh of the sidebar list so other tabs/users show up.
+  sidebarPollTimer = setInterval(fetchConversations, 15000);
 }
 
-function stopPoll() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+function stopSidebarPoll() {
+  if (sidebarPollTimer) { clearInterval(sidebarPollTimer); sidebarPollTimer = null; }
 }
 
 /* -- Mobile sidebar ------------------------------------------------------- */
@@ -437,7 +769,8 @@ function openSidebar()  { sidebar.classList.add("open"); backdrop.classList.add(
 function closeSidebar() { sidebar.classList.remove("open"); backdrop.classList.remove("open"); }
 
 menuBtn.addEventListener("click", () => {
-  sidebar.classList.contains("open") ? closeSidebar() : openSidebar();
+  if (sidebar.classList.contains("open")) closeSidebar();
+  else openSidebar();
 });
 backdrop.addEventListener("click", closeSidebar);
 
@@ -458,10 +791,32 @@ newChatBtn.addEventListener("click", async () => {
   }
 });
 
+/* -- Welcome hint chips --------------------------------------------------- */
+
+async function useWelcomeHint(hintText) {
+  try {
+    if (!selectedId) {
+      const conv = await api.createConversation();
+      selectedId = conv.id;
+      currentConv = conv;
+      await fetchConversations();
+      renderContent();
+      updateInput();
+    }
+    messageInput.value = hintText;
+    sendBtn.disabled = !selectedId;
+    autoResizeTextarea();
+    messageInput.focus();
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
 /* -- Form handling -------------------------------------------------------- */
 
 messageInput.addEventListener("input", () => {
   sendBtn.disabled = !messageInput.value.trim() || !selectedId;
+  autoResizeTextarea();
 });
 
 messageInput.addEventListener("keydown", (e) => {
@@ -476,35 +831,94 @@ messageForm.addEventListener("submit", async (e) => {
   const text = messageInput.value.trim();
   if (!text || !selectedId) return;
 
+  const convId = selectedId;
   sendBtn.disabled = true;
   sendBtn.innerHTML = '<span class="spinner"></span> Sending...';
 
+  appendUserBubble(text);
+  messageInput.value = "";
+  autoResizeTextarea();
+  const typing = showTypingIndicator();
+
   try {
-    currentConv = await api.sendMessage(selectedId, text);
-    messageInput.value = "";
-    renderContent();
-    updateInput();
-    await fetchConversations();
+    if (supportsStreaming) {
+      await sendViaStreaming(convId, text, typing);
+    } else {
+      await sendViaRegular(convId, text);
+    }
   } catch (err) {
+    removeTypingIndicator();
+    removeLiveAgentBubble();
     showToast(err.message);
   } finally {
     sendBtn.disabled = !messageInput.value.trim() || !selectedId;
-    sendBtn.innerHTML = `
-      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-      </svg> Send`;
+    sendBtn.innerHTML = SEND_BTN_HTML;
   }
 });
 
+async function sendViaStreaming(convId, text, typingEl) {
+  let gotToken = false;
+  let streamError = null;
+
+  await api.sendMessageStream(convId, text, {
+    onToken: (token) => {
+      gotToken = true;
+      appendLiveToken(token);
+    },
+    onDone: async (conv) => {
+      removeLiveAgentBubble();
+      removeTypingIndicator();
+      if (conv) {
+        currentConv = conv;
+      } else {
+        currentConv = await api.getConversation(convId);
+      }
+      renderContent();
+      updateInput();
+      await fetchConversations();
+    },
+    onError: (msg) => {
+      streamError = msg;
+    },
+  });
+
+  if (streamError && !gotToken) {
+    // Streaming unavailable or failed before any tokens — fall back.
+    removeTypingIndicator();
+    await sendViaRegular(convId, text);
+    return;
+  }
+  if (streamError) {
+    throw new Error(streamError);
+  }
+  typingEl?.remove();
+}
+
+async function sendViaRegular(convId, text) {
+  const conv = await api.sendMessage(convId, text);
+  currentConv = conv;
+  removeTypingIndicator();
+  removeLiveAgentBubble();
+  renderContent();
+  updateInput();
+  await fetchConversations();
+}
+
 /* -- Init ----------------------------------------------------------------- */
 
+initScrollTracking();
 fetchConversations();
 updateInput();
+autoResizeTextarea();
 
 /* -- SSE Log Stream ------------------------------------------------------- */
 
+let logBackoffMs = 1000;
+const LOG_BACKOFF_MAX_MS = 30000;
+
 function connectLogStream() {
   const evtSource = new EventSource("/logs/stream");
+  evtSource.onopen = () => { logBackoffMs = 1000; };
   evtSource.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);
@@ -518,7 +932,8 @@ function connectLogStream() {
   };
   evtSource.onerror = () => {
     evtSource.close();
-    setTimeout(connectLogStream, 3000);
+    setTimeout(connectLogStream, logBackoffMs);
+    logBackoffMs = Math.min(logBackoffMs * 2, LOG_BACKOFF_MAX_MS);
   };
 }
 

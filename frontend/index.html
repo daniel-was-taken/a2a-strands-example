@@ -3,8 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'self'; frame-ancestors 'none';" />
+  <meta name="description" content="BRD Specialist — AI-assisted generation of Business Requirements Documents from data evidence." />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="color-scheme" content="light" />
+  <meta property="og:title" content="BRD Specialist" />
+  <meta property="og:description" content="Generate Business Requirements Documents with evidence-grounded AI agents." />
+  <meta property="og:type" content="website" />
   <title>BRD Specialist</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234f46e5' stroke-width='2'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3Cline x1='16' y1='13' x2='8' y2='13'/%3E%3Cline x1='16' y1='17' x2='8' y2='17'/%3E%3Cpolyline points='10 9 9 9 8 9'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
 </head>
 <body>
   <div class="layout">
@@ -18,9 +26,10 @@
         <button class="new-chat-btn" id="new-chat-btn">+ New BRD</button>
       </div>
       <div class="sidebar-content" id="conversation-list">
-        <div class="empty-state">
-          <p class="empty-title">No documents yet</p>
-          <p class="empty-sub">Start a new BRD to begin</p>
+        <div class="sidebar-loading">
+          <div class="sidebar-skeleton"></div>
+          <div class="sidebar-skeleton"></div>
+          <div class="sidebar-skeleton"></div>
         </div>
       </div>
     </aside>
@@ -32,15 +41,15 @@
       </button>
 
       <div class="main-scroll" id="main-scroll">
-        <div class="content-area" id="content-area">
+        <div class="content-area" id="content-area" aria-live="polite" aria-relevant="additions text" aria-busy="false">
           <div class="welcome">
             <svg class="welcome-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
             <h2>BRD Specialist</h2>
             <p>Describe your requirements and I'll generate a Business Requirements Document</p>
             <div class="welcome-hints">
-              <span class="welcome-hint">Fetch records and draft a BRD</span>
-              <span class="welcome-hint">Analyse data and create requirements</span>
-              <span class="welcome-hint">Review evidence and generate docs</span>
+              <button type="button" class="welcome-hint" data-hint="Fetch records and draft a BRD">Fetch records and draft a BRD</button>
+              <button type="button" class="welcome-hint" data-hint="Analyse data and create requirements">Analyse data and create requirements</button>
+              <button type="button" class="welcome-hint" data-hint="Review evidence and generate docs">Review evidence and generate docs</button>
             </div>
           </div>
         </div>
@@ -48,6 +57,9 @@
 
       <!-- Input bar -->
       <div class="input-bar">
+        <div class="input-meta">
+          <span class="response-time" id="response-time"></span>
+        </div>
         <form id="message-form" class="input-form">
           <textarea
             id="message-input"
@@ -78,6 +90,8 @@
   <div class="backdrop" id="backdrop"></div>
   <div class="toast-container" id="toast-container"></div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/vendor/marked.min.js"></script>
+  <script src="/static/vendor/purify.min.js"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

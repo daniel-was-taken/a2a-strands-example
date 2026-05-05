@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5% 64.9%;
+    --radius: 0.65rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 5%;
+    --card-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 40%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    @apply h-full;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* --- Markdown (prose-like) styles ------------------------------------ */
+.md-body {
+  @apply text-sm leading-relaxed text-foreground;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  @apply font-semibold mt-4 mb-2 text-foreground;
+}
+.md-body h1 { @apply text-xl; }
+.md-body h2 { @apply text-lg border-b pb-1 border-border; }
+.md-body h3 { @apply text-base; }
+.md-body p { @apply my-2; }
+.md-body ul { @apply list-disc pl-6 my-2 space-y-1; }
+.md-body ol { @apply list-decimal pl-6 my-2 space-y-1; }
+.md-body code {
+  @apply rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em];
+}
+.md-body pre {
+  @apply rounded-lg bg-muted p-3 overflow-x-auto my-3;
+}
+.md-body pre code { @apply bg-transparent p-0; }
+.md-body blockquote {
+  @apply border-l-4 border-border pl-3 italic text-muted-foreground my-2;
+}
+.md-body table {
+  @apply w-full border-collapse my-3 text-xs;
+}
+.md-body th,
+.md-body td {
+  @apply border border-border px-2 py-1 text-left;
+}
+.md-body th { @apply bg-muted font-semibold; }
+.md-body a {
+  @apply text-primary underline underline-offset-2 hover:no-underline;
+}
+
+/* Shimmer loading bar */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--accent)) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+
+/* Pulsing cursor used in streaming bubbles */
+.streaming-cursor::after {
+  content: "▍";
+  margin-left: 2px;
+  animation: blink 1s steps(2, end) infinite;
+  opacity: 0.6;
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Hide scrollbar on inner scroll containers but keep scroll working */
+.scrollbar-subtle::-webkit-scrollbar { width: 8px; height: 8px; }
+.scrollbar-subtle::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+.scrollbar-subtle::-webkit-scrollbar-track { background: transparent; }
