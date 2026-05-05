@@ -22,7 +22,8 @@ graph TB
     end
 
     subgraph External ["External Systems"]
-        MCP[MCP Server]
+        NeonAPI[Neon Data API]
+        MCP[Optional MCP Server]
         LLM[Gemini]
     end
 
@@ -35,7 +36,7 @@ graph TB
     Router --> GR
     Router --> RT
     Router --> BRD
-    DB --> MCP
+    DB --> NeonAPI
     Orchestrator --> LLM
     GR --> LLM
     RT --> LLM
@@ -154,3 +155,9 @@ sequenceDiagram
 - Approval and evidence confirmation are separate states because they solve different risks.
 - Custom and MCP agents share one startup path so the framework stays configuration-driven.
 - The BRD flow is staged to keep facts and assumptions separated.
+- The Database Agent uses the Neon Data API over HTTPS (`db/neon.py`) rather than MCP,
+  which cuts a process hop and keeps retry/auth logic next to the call site.
+- Conversation persistence is async end-to-end (psycopg v3 AsyncConnectionPool) so FastAPI
+  handlers never block the event loop on database I/O.
+- The orchestrator exposes `POST /conversations/{id}/messages/stream` that forwards
+  Strands `stream_async` events as SSE, giving the UI a typing indicator and live tokens.

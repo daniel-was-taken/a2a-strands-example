@@ -5,8 +5,7 @@ Reads agents.yaml and starts all declared agents plus the orchestrator
 as separate processes.
 
 Usage:
-    python run_system.py                          # A2A mode (default)
-    DATABASE_MODE=direct python run_system.py     # Direct mode -- orchestrator only
+    python run_system.py
 """
 
 import os
@@ -79,21 +78,14 @@ def _wait_for_agents(
 
 
 def main():
-    mode = os.environ.get("DATABASE_MODE", "a2a")
     python = sys.executable
     config_path = os.environ.get("AGENTS_CONFIG", "agents.yaml")
 
     print("\n=== A2A Orchestrator ===\n")
 
-    if mode == "direct":
-        print("Starting system (direct mode -- single process)...")
-        print("  Orchestrator -> http://localhost:8000\n")
-        os.execvp(python, [python, "-m", "core.orchestrator"])
-        return
-
     agents_config = _load_agents_config()
 
-    print("Starting system (A2A mode)...")
+    print("Starting system...")
     for cfg in agents_config:
         print(f"  {cfg['name']:20s} -> http://localhost:{cfg['port']}")
     print(f"  {'Orchestrator':20s} -> http://localhost:8000")
