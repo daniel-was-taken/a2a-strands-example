@@ -130,7 +130,6 @@ def test_send_message_to_awaiting_returns_409(client_approve):
 def test_fetch_and_brd_request_pauses_for_confirmation(client, monkeypatch):
     import core.orchestrator as orch
 
-    monkeypatch.setattr(orch.settings, "database_mode", "a2a")
     monkeypatch.setattr(
         orch,
         "_run_orchestrator_prompt",
@@ -157,7 +156,6 @@ def test_fetch_and_brd_request_pauses_for_confirmation(client, monkeypatch):
 def test_confirm_evidence_generates_brd(client, monkeypatch):
     import core.orchestrator as orch
 
-    monkeypatch.setattr(orch.settings, "database_mode", "a2a")
     monkeypatch.setattr(
         orch,
         "_run_orchestrator_prompt",
@@ -185,7 +183,6 @@ def test_confirm_evidence_generates_brd(client, monkeypatch):
 def test_reject_evidence_clears_brd_workflow(client, monkeypatch):
     import core.orchestrator as orch
 
-    monkeypatch.setattr(orch.settings, "database_mode", "a2a")
     monkeypatch.setattr(
         orch,
         "_run_orchestrator_prompt",

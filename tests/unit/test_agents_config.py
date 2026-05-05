@@ -65,6 +65,20 @@ def test_load_custom_agent_config(tmp_path):
     assert agent["factory"] == "create_graph_agent"
 
 
+def test_repo_database_agent_is_custom():
+    """The checked-in agents.yaml should register the Database Agent as custom."""
+    repo_config = Path(__file__).resolve().parents[2] / "agents.yaml"
+    loaded = yaml.safe_load(repo_config.read_text())
+    db_agent = next(a for a in loaded["agents"] if a["name"] == "Database Agent")
+    assert db_agent["type"] == "custom"
+    assert db_agent["module"] == "agents.database_agent"
+    assert db_agent["factory"] == "create_agent"
+    # Neon-specific MCP fields should no longer be present on the Database Agent.
+    assert "mcp_url" not in db_agent
+    assert "auth" not in db_agent
+    assert "tools" not in db_agent
+
+
 def test_load_agents_config_with_auth(tmp_path):
     """Auth block should be parsed correctly."""
     config = {

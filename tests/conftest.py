@@ -8,7 +8,6 @@ import tempfile
 from pathlib import Path
 
 # Set test defaults BEFORE any module imports trigger Settings() creation.
-os.environ.setdefault("DATABASE_MODE", "direct")
 os.environ.setdefault("GOOGLE_API_KEY", "test-google-key")
 
 from unittest.mock import MagicMock, patch
@@ -70,7 +69,6 @@ os.environ.setdefault("AGENTS_CONFIG", _test_config_path)
 def _mock_env(monkeypatch):
     """Ensure required env vars are set for tests (runtime reads)."""
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
-    monkeypatch.setenv("DATABASE_MODE", "direct")
     monkeypatch.setenv("AGENTS_CONFIG", _test_config_path)
 
 
