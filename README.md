@@ -33,12 +33,13 @@ path, and no clean way to add new agents.
 
 ```text
 a2a-strands-example/
-├── core/                   # Framework runtime
+├── core/                   # Framework runtime (orchestrator, metrics, streaming, store)
 ├── agents/                 # Custom agents you can fork and change
-├── db/                     # Optional Postgres-backed store
+├── db/                     # Neon Data API client + async Postgres store
 ├── docs/                   # Focused architecture and demo guides
-├── examples/               # Standalone pattern examples
-├── frontend/               # Browser UI
+├── web/                    # Next.js 14 frontend (production, static export → web/out/)
+├── frontend/               # Legacy vanilla-JS UI (automatic fallback when web/out/ is absent)
+├── scripts/                # Benchmark and operational scripts
 ├── agents.yaml             # Agent declarations
 ├── run_system.py           # Local multi-process launcher
 └── .env.example            # Local environment template
@@ -58,7 +59,23 @@ cp .env.example .env
 Set at least these values in `.env`:
 
 - `GOOGLE_API_KEY` or `GOOGLE_CLOUD_PROJECT`
-- any MCP credential referenced by `agents.yaml` such as `NEON_API_KEY`
+- `NEON_DATABASE_URL` — Neon SQL-over-HTTP endpoint (e.g. `https://<host>.neon.tech/sql`)
+- `NEON_CONNECTION_STRING` — Postgres connection string (`postgresql://user:pass@<host>/<db>?sslmode=require`) sent in the `Neon-Connection-String` header
+- Any additional credentials referenced by MCP agents you register in `agents.yaml`
+
+For deployments that persist conversations, set:
+
+- `STORE_BACKEND=postgres`
+- `DATABASE_URL` — Postgres connection string (used by the async `psycopg` pool)
+
+Build the frontend (one-time, or after UI changes):
+
+```bash
+cd web
+npm install
+npm run build      # → emits static bundle to web/out/
+cd ..
+```
 
 Start the local A2A system:
 
@@ -66,13 +83,10 @@ Start the local A2A system:
 python run_system.py
 ```
 
-Then open `http://localhost:8000`.
-
-Direct mode is still available when you only want the first MCP agent loaded in-process:
-
-```bash
-DATABASE_MODE=direct python run_system.py
-```
+Then open `http://localhost:8000`. FastAPI serves the Next.js export from
+`web/out/` when present, and falls back to the legacy `frontend/` bundle
+otherwise. See [`web/README.md`](web/README.md) for dev-server and
+architecture details.
 
 ## Running Individual Agents
 
@@ -108,6 +122,7 @@ There is a step-by-step demo guide in [docs/demo-brd-use-case.md](docs/demo-brd-
 | `GET` | `/conversations/{id}` | Get one conversation with messages and events |
 | `DELETE` | `/conversations/{id}` | Delete a conversation |
 | `POST` | `/conversations/{id}/messages` | Send a message |
+| `POST` | `/conversations/{id}/messages/stream` | Send a message and stream tokens over SSE |
 | `POST` | `/conversations/{id}/approve` | Approve a destructive request |
 | `POST` | `/conversations/{id}/reject` | Reject a destructive request |
 | `POST` | `/conversations/{id}/confirm-evidence` | Confirm fetched evidence and draft the BRD |
@@ -149,7 +164,21 @@ python run_system.py
 
 ## Current Reference Agents
 
-- `Database Agent`: MCP-backed data access
+- `Database Agent`: custom agent backed by the Neon Data API (SQL-over-HTTP)
 - `Graph Reviewer`: structured analyze -> implement -> review workflow
 - `BRD Specialist`: mixed-audience BRD drafting from confirmed evidence
 - `Research Team`: autonomous swarm for collaborative research and writing
+
+MCP remains a first-class agent type (see `EXTENDING.md`) — the Neon-specific
+integration moved off MCP onto the Neon Data API for lower latency and simpler
+auth, but any non-Neon MCP server can still be registered in `agents.yaml`.
+
+## Benchmarking
+
+`scripts/benchmark.py` sends N identical requests to a running orchestrator
+and prints a latency distribution, tagged with a `--mode` label so you can
+compare runs (e.g. MCP-backed vs Neon Data API):
+
+```bash
+python scripts/benchmark.py --prompt "list all tables" --count 30 --mode api
+```

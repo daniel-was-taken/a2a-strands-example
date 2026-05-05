@@ -1,28 +1,15 @@
 agents:
-  # ── MCP agent (config-only, no code needed) ───────────────────────────────
+  # ── Database agent (custom, backed by Neon Data API) ──────────────────────
   - name: "Database Agent"
-    type: mcp
+    type: custom
     port: 8001
     description: "Full database access: schema inspection, SELECT, INSERT, DELETE queries"
-    mcp_url: "https://mcp.neon.tech/mcp"
-    auth:
-      type: bearer
-      env_var: NEON_API_KEY
-    tools: ["get_database_tables", "describe_table_schema", "run_sql"]
-    system_prompt: |
-      You are DatabaseAgent, a database assistant with full access.
-
-      Use the available MCP tools to inspect schema and execute SQL queries.
-      Consider tables from all user-defined schemas.
-      Ignore system/internal schemas (pg_catalog, information_schema, etc.).
-      Always query the actual database. Never fabricate schema information.
-
-      If an operation fails, report the error clearly and stop.
-      Do not retry the same failing operation.
+    module: "agents.database_agent"
+    factory: "create_agent"
     skills:
       - id: database-ops
         name: Database Operations
-        description: "Schema inspection and SQL queries (SELECT)"
+        description: "Schema inspection and SQL queries"
         tags: [database, sql]
 
   # ── Graph agent (multi-step workflow) ─────────────────────────────────────

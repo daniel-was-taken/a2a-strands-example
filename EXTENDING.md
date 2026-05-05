@@ -149,12 +149,24 @@ Typical fit:
 - analyst -> reviewer -> presenter
 - planner -> executor -> checker
 
-### Pipeline of Remote Agents
+### Custom Agent with HTTP-backed `@tool` functions
 
-Use remote A2A agents as building blocks inside another workflow when you want to compose agents
-from multiple services.
+Use this when the agent needs to call an external HTTP API (like a SQL-over-HTTP
+gateway) rather than go through MCP. The Database Agent is the canonical example:
 
-Reference: `examples/pipeline_agent.py`
+- `db/neon.py` is a thin async HTTP client with retries and a read-only toggle.
+- `agents/database_agent.py` wraps each client method as a Strands `@tool` function
+  and returns an `Agent` from a `create_agent()` factory.
+- `agents.yaml` registers the agent with `type: custom` and points at the module
+  and factory.
+
+Reference: `agents/database_agent.py` + `db/neon.py`
+
+Typical fit:
+
+- database access without a pre-packaged MCP server
+- per-call retries and auth owned by your code, not the transport
+- wrapping a REST API in a few focused tools
 
 ## When to Change `core/`
 
@@ -193,9 +205,9 @@ If you want to add a similar staged workflow, follow the same shape:
 
 Key settings live in `core/config.py`.
 
-- `DATABASE_MODE=a2a|direct`
 - `STORE_BACKEND=memory|postgres`
-- `DATABASE_URL=...` for Postgres persistence
+- `DATABASE_URL=...` for Postgres persistence (async `psycopg` pool)
+- `NEON_DATABASE_URL=...` / `NEON_CONNECTION_STRING=...` for the Database Agent's Data API client
 - `API_KEY=...` for orchestrator request auth
 - `AGENT_API_KEY=...` for inter-agent auth
 - `GOOGLE_API_KEY` or `GOOGLE_CLOUD_PROJECT` for Gemini access
